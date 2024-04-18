@@ -63,6 +63,13 @@ trap(struct trapframe *tf)
   case T_IRQ0 + IRQ_IDE+1:
     // Bochs generates spurious IDE1 interrupts.
     break;
+  case T_PGFLT:
+    if (copy_on_write()) break;
+
+    // swap
+    break;
+
+
   case T_IRQ0 + IRQ_KBD:
     kbdintr();
     lapiceoi();

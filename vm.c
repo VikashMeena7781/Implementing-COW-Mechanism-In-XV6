@@ -12,6 +12,63 @@ pde_t *kpgdir;  // for use in scheduler()
 
 // Set up CPU's kernel segment descriptors.
 // Run once on entry on each CPU.
+
+
+void rmap_init() {
+    for (int i = 0; i < MAX_RMAP_ENTRIES; i++) {
+        rmaps[i].pa = 0;
+        rmaps[i].ref_count = 0;
+    }
+}
+
+
+int rmap_increment(uint pa) {
+    int free_index = -1;  // Store index of the first free slot
+
+    for (int i = 0; i < MAX_RMAP_ENTRIES; i++) {
+        if (rmaps[i].pa == pa && rmaps[i].ref_count > 0) {
+            rmaps[i].ref_count++;  // Increment ref count if pa found
+            return rmaps[i].ref_count;
+        }
+        if (rmaps[i].ref_count == 0 && free_index == -1) {
+            free_index = i;  // Remember first free slot
+        }
+    }
+
+    // If pa was not found and there is a free slot, use it
+    if (free_index != -1) {
+        rmaps[free_index].pa = pa;
+        rmaps[free_index].ref_count = 1;
+        return rmaps[free_index].ref_count;
+    }
+
+    return -1; // No space in rmap and pa not found
+}
+
+
+
+int rmap_decrement(uint pa) {
+    for (int i = 0; i < MAX_RMAP_ENTRIES; i++) {
+        if (rmaps[i].pa == pa) {  // Find the entry matching the physical address
+            if (rmaps[i].ref_count > 0) {
+                rmaps[i].ref_count--;  // Decrement the reference count
+                if (rmaps[i].ref_count == 0) {
+                    // Optional: Handle the case where no references remain
+                    // This could involve freeing the page, marking the entry as empty, etc.
+                    rmaps[i].pa = 0;  // Mark the entry as unused
+                }
+                return rmaps[i].ref_count;  // Success
+            } else {
+                // Error: trying to decrement a non-referenced page
+                return -1;  // Failure or error
+            }
+        }
+    }
+    return -1; // No entry found for given physical address
+}
+
+
+
 void
 seginit(void)
 {
@@ -388,6 +445,87 @@ bad:
 
 
 
+// int copy_on_write(void) {
+//     struct proc *curproc = myproc();
+//     uint faulting_addr = rcr2();  // Read CR2 register to get the faulting virtual address
+//     pte_t *pte;
+//     char *mem;
+
+//     // Get the page table entry for the faulting address
+//     if ((pte = walkpgdir(curproc->pgdir, (void *)faulting_addr, 0)) == 0)
+//         panic("copy_on_write: pte should exist");
+
+//     // Check if the fault was due to a write attempt on a read-only page
+//     if (!(*pte & PTE_W)) {
+//         // Allocate a new page
+//         if ((mem = kalloc()) == 0)
+//             panic("copy_on_write: unable to allocate memory");
+
+//         // Get the physical address from the page table entry
+//         uint pa = PTE_ADDR(*pte);
+//         // Copy the contents of the old page to the new page
+//         memmove(mem, (char*)P2V(pa), PGSIZE);
+
+//         // Map the new page with write permissions
+//         if (mappages(curproc->pgdir, (void*)(faulting_addr & ~0xFFF), PGSIZE, V2P(mem), PTE_FLAGS(*pte) | PTE_W) < 0) {
+//             kfree(mem);
+//             panic("copy_on_write: mappages failed");
+//         }
+
+//         // Unmap the old page
+//         // kfree(P2V(pa));
+//         *pte = 0;  // Clear the old page table entry to avoid stale mappings
+//         return 1;
+//     }
+
+//     return 0;
+// }
+
+int copy_on_write(void) {
+    struct proc *curproc = myproc();
+    uint faulting_addr = rcr2();  // Read CR2 register to get the faulting virtual address
+    pte_t *pte;
+
+    // Get the page table entry for the faulting address
+    if ((pte = walkpgdir(curproc->pgdir, (void *)faulting_addr, 0)) == 0) {
+        panic("copy_on_write: pte should exist");
+    }
+
+    // Check if the fault was due to a write attempt on a read-only page
+    if (!(*pte & PTE_W) && (*pte & PTE_P)) {
+        // It's a read-only page but present, handle COW
+        char *mem;
+
+        // Allocate a new page
+        if ((mem = kalloc()) == 0) {
+            panic("copy_on_write: unable to allocate memory");
+        }
+
+        // Copy the contents of the old page to the new page
+        uint pa = PTE_ADDR(*pte);
+        memmove(mem, (char*)P2V(pa), PGSIZE);
+
+        // Map the new page with write permissions
+        if (mappages(curproc->pgdir, (void*)(faulting_addr & ~0xFFF), PGSIZE, V2P(mem), PTE_FLAGS(*pte) | PTE_W) < 0) {
+            kfree(mem);
+            panic("copy_on_write: mappages failed");
+        }
+
+        // Update the rmap if using a reference count system
+        // rmap_decrement(pa);
+        rmap_increment(V2P(mem));
+
+        if (rmap_decrement(pa) == 0) {  // Check if this was the last reference
+            *pte = 0;  // Clear the PTE if no more references to this page exist
+            lcr3(V2P(curproc->pgdir));  // Refresh the TLB to reflect the PTE change
+        }
+
+        return 1;  // Handled a COW page fault
+    }
+
+    // The page fault was not due to a COW scenario
+    return 0;
+}
 
 
 //PAGEBREAK!

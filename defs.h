@@ -173,6 +173,7 @@ void            uartintr(void);
 void            uartputc(int);
 
 // vm.c
+void            rmap_init();
 void            seginit(void);
 void            kvmalloc(void);
 pde_t*          setupkvm(void);
@@ -190,3 +191,12 @@ void            clearpteu(pde_t *pgdir, char *uva);
 
 // number of elements in fixed-size array
 #define NELEM(x) (sizeof(x)/sizeof((x)[0]))
+
+struct rmap_entry {
+    uint pa;           // Physical address of the page
+    int ref_count;     // Reference count of how many processes use this page
+};
+
+#define MAX_RMAP_ENTRIES 1024
+struct rmap_entry rmaps[MAX_RMAP_ENTRIES];
+
