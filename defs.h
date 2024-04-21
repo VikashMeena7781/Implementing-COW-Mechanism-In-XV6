@@ -174,6 +174,7 @@ void            uartputc(int);
 
 // vm.c
 void            rmap_init();
+int             copy_on_write(void);
 void            seginit(void);
 void            kvmalloc(void);
 pde_t*          setupkvm(void);
@@ -198,5 +199,6 @@ struct rmap_entry {
 };
 
 #define MAX_RMAP_ENTRIES 1024
-struct rmap_entry rmaps[MAX_RMAP_ENTRIES];
+extern struct rmap_entry rmaps[MAX_RMAP_ENTRIES];
+
 

@@ -72,6 +72,7 @@ runcmd(struct cmd *cmd)
     panic("runcmd");
 
   case EXEC:
+    printf(1,"EXEC\n");
     ecmd = (struct execcmd*)cmd;
     if(ecmd->argv[0] == 0)
       exit();
@@ -80,6 +81,7 @@ runcmd(struct cmd *cmd)
     break;
 
   case REDIR:
+    printf(1, "REDIR\n");
     rcmd = (struct redircmd*)cmd;
     close(rcmd->fd);
     if(open(rcmd->file, rcmd->mode) < 0){
@@ -90,6 +92,7 @@ runcmd(struct cmd *cmd)
     break;
 
   case LIST:
+    printf(1, "LIST\n");
     lcmd = (struct listcmd*)cmd;
     if(fork1() == 0)
       runcmd(lcmd->left);
@@ -98,6 +101,7 @@ runcmd(struct cmd *cmd)
     break;
 
   case PIPE:
+    printf(1, "PIPE\n");
     pcmd = (struct pipecmd*)cmd;
     if(pipe(p) < 0)
       panic("pipe");

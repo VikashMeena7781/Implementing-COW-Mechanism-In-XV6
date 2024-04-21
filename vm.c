@@ -12,6 +12,7 @@ pde_t *kpgdir;  // for use in scheduler()
 
 // Set up CPU's kernel segment descriptors.
 // Run once on entry on each CPU.
+struct rmap_entry rmaps[MAX_RMAP_ENTRIES];
 
 
 void rmap_init() {
@@ -126,7 +127,12 @@ mappages(pde_t *pgdir, void *va, uint size, uint pa, int perm)
     if((pte = walkpgdir(pgdir, a, 1)) == 0)
       return -1;
     if(*pte & PTE_P)
-      panic("remap");
+      {cprintf("mappages: pte: %p\n", pte);
+      cprintf("mappages: pa: %p\n", pa);
+      cprintf("mappages: perm: %p\n", perm);
+      cprintf("mappages: PTE_ADDR(*pte): %p\n", PTE_ADDR(*pte));
+      cprintf("mappages: PTE_FLAGS(*pte): %p\n", PTE_FLAGS(*pte));
+      panic("remap");}
     *pte = pa | perm | PTE_P;
     if(a == last)
       break;
@@ -344,14 +350,15 @@ freevm(pde_t *pgdir)
 
   if(pgdir == 0)
     panic("freevm: no pgdir");
-  deallocuvm(pgdir, KERNBASE, 0);
+  // deallocuvm(pgdir, KERNBASE, 0);
   for(i = 0; i < NPDENTRIES; i++){
     if(pgdir[i] & PTE_P){
-      char * v = P2V(PTE_ADDR(pgdir[i]));
-      kfree(v);
+      // char * v = P2V(PTE_ADDR(pgdir[i]));
+      // apply logic for freeing
+      // kfree(v);
     }
   }
-  kfree((char*)pgdir);
+  // kfree((char*)pgdir);
 }
 
 // Clear PTE_U on a page. Used to create an inaccessible
@@ -408,8 +415,9 @@ pde_t*
 copyuvm(pde_t *pgdir, uint sz)
 {
   pde_t *d;
-  pte_t *pte;
-  uint pa, i, flags;
+  pte_t *pte , *new_pte;
+  // uint pa, i, flags;
+  uint i ;
 
   if((d = setupkvm()) == 0)
     return 0;
@@ -419,16 +427,23 @@ copyuvm(pde_t *pgdir, uint sz)
     if(!(*pte & PTE_P))
       panic("copyuvm: page not present");
 
-    pa = PTE_ADDR(*pte);
-    flags = PTE_FLAGS(*pte);
+    // pa = PTE_ADDR(*pte);
+    // flags = PTE_FLAGS(*pte);
 
     // Make the page in the parent read-only
     *pte = (*pte & ~PTE_W) | PTE_U;
 
+    new_pte = walkpgdir(d, (void *)i , 1);
+    if (*new_pte & PTE_P) panic("firse wahi dikkat");
+
+    * new_pte = * pte;
+
+
+
     // Duplicate the PTE for the child, also as read-only
-    if(mappages(d, (void*)i, PGSIZE, pa, flags & ~PTE_W) < 0) {
-      goto bad;
-    }
+    // if(mappages(d, (void*)i, PGSIZE, pa, flags & ~PTE_W) < 0) {
+    //   goto bad;
+    // }
   }
 
     // Invalidate the TLB to ensure the CPU uses updated page table entries
@@ -438,9 +453,9 @@ copyuvm(pde_t *pgdir, uint sz)
 
   return d;
 
-bad:
-  freevm(d);
-  return 0;
+// bad:
+//   freevm(d);
+//   return 0;
 }
 
 
@@ -485,10 +500,11 @@ int copy_on_write(void) {
     struct proc *curproc = myproc();
     uint faulting_addr = rcr2();  // Read CR2 register to get the faulting virtual address
     pte_t *pte;
+    cprintf("copy on write used\n");
 
     // Get the page table entry for the faulting address
     if ((pte = walkpgdir(curproc->pgdir, (void *)faulting_addr, 0)) == 0) {
-        panic("copy_on_write: pte should exist");
+        panic("copy_on_write: pte should exist\n");
     }
 
     // Check if the fault was due to a write attempt on a read-only page
@@ -506,22 +522,26 @@ int copy_on_write(void) {
         memmove(mem, (char*)P2V(pa), PGSIZE);
 
         // Map the new page with write permissions
-        if (mappages(curproc->pgdir, (void*)(faulting_addr & ~0xFFF), PGSIZE, V2P(mem), PTE_FLAGS(*pte) | PTE_W) < 0) {
-            kfree(mem);
-            panic("copy_on_write: mappages failed");
-        }
+        // if (mappages(curproc->pgdir, (void*)(faulting_addr & ~0xFFF), PGSIZE, V2P(mem), PTE_FLAGS(*pte) | PTE_W) < 0) {
+        //     kfree(mem);
+        //     panic("copy_on_write: mappages failed");
+        // }
+
+        *pte = V2P(mem) | PTE_FLAGS(*pte) | PTE_W | PTE_P;  
 
         // Update the rmap if using a reference count system
         // rmap_decrement(pa);
         rmap_increment(V2P(mem));
 
         if (rmap_decrement(pa) == 0) {  // Check if this was the last reference
-            *pte = 0;  // Clear the PTE if no more references to this page exist
-            lcr3(V2P(curproc->pgdir));  // Refresh the TLB to reflect the PTE change
+            // *pte = 0;  // Clear the PTE if no more references to this page exist
         }
+
+        lcr3(V2P(curproc->pgdir));  // Refresh the TLB to reflect the PTE change
 
         return 1;  // Handled a COW page fault
     }
+    else panic("page writeable or not present");
 
     // The page fault was not due to a COW scenario
     return 0;
