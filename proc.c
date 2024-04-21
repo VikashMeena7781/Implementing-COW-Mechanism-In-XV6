@@ -6,6 +6,7 @@
 #include "x86.h"
 #include "proc.h"
 #include "spinlock.h"
+#include "swap.h"
 
 struct {
   struct spinlock lock;
@@ -325,6 +326,63 @@ void print_rss()
     cprintf("((P)) id: %d, state: %d, rss: %d\n",p->pid,p->state,p->rss);
   }
   release(&ptable.lock);
+}
+
+
+struct proc* get_victim_proc(void){
+  struct proc* victim_process;
+  struct proc* p;
+  int mem_size = 0;
+
+  // Select the victim process with the largest RSS or lowest PID if equal RSS
+  acquire(&ptable.lock);
+  for (p = ptable.proc; p < &ptable.proc[NPROC]; p++) {
+    if(mem_size==0){
+      mem_size=p->rss;
+      victim_process=p;
+    }
+    else if(p->rss > mem_size) {
+      victim_process = p;
+      mem_size = p->rss;
+    }else if (p->rss == mem_size && victim_process->pid > p->pid) {
+      victim_process = p;
+      mem_size = p->rss;
+    }
+  }
+  release(&ptable.lock);
+  return victim_process;
+
+}
+
+
+pte_t* get_victim_page(struct proc* victim_process) {
+  pte_t *victim_page;
+  // Find the victim page within the victim process
+  int accessed_page=0;
+  for (uint i = 0; i < victim_process->sz; i += PGSIZE) {
+    victim_page = walkpgdir(victim_process->pgdir, (char*)i, 0);
+    if (victim_page && (*victim_page & PTE_P) && !(*victim_page & PTE_A)) {
+      return victim_page;
+    }else if(victim_page && (*victim_page & PTE_P) && (*victim_page & PTE_A)){
+      accessed_page +=1;
+    }
+  }
+  // convert 10% of accessed pages to non-accessed by unsetting the PTE_A flag.
+  accessed_page = (accessed_page + 9) /10;
+  for (uint i = 0 ; i < victim_process->sz ; i+= PGSIZE ){
+    victim_page = walkpgdir(victim_process->pgdir,(char*)i,0);
+    if (victim_page && (*victim_page & PTE_P) && (*victim_page & PTE_A))
+    {
+      *victim_page &= ~PTE_A;
+      accessed_page--;
+    }
+    if (accessed_page == 0)
+    {
+      break;
+    }
+  }
+  return get_victim_page(victim_process);
+
 }
 
 //PAGEBREAK: 42

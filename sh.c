@@ -193,8 +193,10 @@ fork1(void)
   printf(2, "pid:  %d\n", getpid());
   printf(2, "pid:  %d\n", pid);
 
-  if(pid == -1)
+  if(pid == -1){
+    printf(1,"Inside fork1\n");
     panic("fork");
+  }
   return pid;
 }
 
