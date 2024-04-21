@@ -98,7 +98,9 @@ kalloc(void)
     kmem.freelist = r->next;
     kmem.num_free_pages-=1;
   }
-    
+  if (kmem.num_free_pages<1){
+    cprintf( "Out of memory\n");
+  }
   if(kmem.use_lock)
     release(&kmem.lock);
   return (char*)r;

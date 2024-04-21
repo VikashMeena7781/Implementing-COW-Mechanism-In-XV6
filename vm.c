@@ -185,7 +185,8 @@ setupkvm(void)
   struct kmap *k;
 
   if((pgdir = (pde_t*)kalloc()) == 0)
-    return 0;
+  {cprintf("lund mera");
+    return 0;}
   memset(pgdir, 0, PGSIZE);
   if (P2V(PHYSTOP) > (void*)DEVSPACE)
     panic("PHYSTOP too high");
@@ -193,6 +194,7 @@ setupkvm(void)
     if(mappages(pgdir, k->virt, k->phys_end - k->phys_start,
                 (uint)k->phys_start, k->perm) < 0) {
       freevm(pgdir);
+      cprintf("lund tera");
       return 0;
     }
   return pgdir;
@@ -353,12 +355,12 @@ freevm(pde_t *pgdir)
   // deallocuvm(pgdir, KERNBASE, 0);
   for(i = 0; i < NPDENTRIES; i++){
     if(pgdir[i] & PTE_P){
-      // char * v = P2V(PTE_ADDR(pgdir[i]));
+      char * v = P2V(PTE_ADDR(pgdir[i]));
       // apply logic for freeing
-      // kfree(v);
+      kfree(v);
     }
   }
-  // kfree((char*)pgdir);
+  kfree((char*)pgdir);
 }
 
 // Clear PTE_U on a page. Used to create an inaccessible
@@ -419,8 +421,10 @@ copyuvm(pde_t *pgdir, uint sz)
   // uint pa, i, flags;
   uint i ;
 
-  if((d = setupkvm()) == 0)
+  if((d = setupkvm()) == 0){
+    cprintf("0 is returned\n");
     return 0;
+  }
   for(i = 0; i < sz; i += PGSIZE){
     if((pte = walkpgdir(pgdir, (void *) i, 0)) == 0)
       panic("copyuvm: pte should exist");
@@ -447,7 +451,7 @@ copyuvm(pde_t *pgdir, uint sz)
   }
 
     // Invalidate the TLB to ensure the CPU uses updated page table entries
-      struct proc *curproc = myproc();
+    struct proc *curproc = myproc();
 
     switchuvm(curproc);
 
