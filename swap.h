@@ -1,5 +1,5 @@
 #define SWAP_SLOT_SIZE 8 // Each swap slot takes up 8 blocks
-#define NSLOTS 286 //total number of slots 32
+// #define NSLOTS 286 //total number of slots 32
 // #define PTE_swapped     0x008   // Swapped  
 #define FREE 1
 #define OCCUPIED 0

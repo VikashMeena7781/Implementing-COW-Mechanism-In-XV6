@@ -341,15 +341,15 @@ struct proc* get_victim_proc(void){
   acquire(&ptable.lock);
   for (p = ptable.proc; p < &ptable.proc[NPROC]; p++) {
     if(mem_size==0){
-      mem_size=p->rss;
+      mem_size=p->sz;
       victim_process=p;
     }
-    else if(p->rss > mem_size) {
+    else if(p->sz > mem_size) {
       victim_process = p;
-      mem_size = p->rss;
-    }else if (p->rss == mem_size && victim_process->pid > p->pid) {
+      mem_size = p->sz;
+    }else if (p->sz == mem_size && victim_process->pid > p->pid) {
       victim_process = p;
-      mem_size = p->rss;
+      mem_size = p->sz;
     }
   }
   release(&ptable.lock);
