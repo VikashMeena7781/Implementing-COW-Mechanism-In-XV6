@@ -165,7 +165,7 @@ void update(pte_t *pte, int swap_slot) {
     uint pa = PTE_ADDR(*pte); // Extract the physical address from the page table entry
     struct rmap_entry *entry;
     int i, j;
-    cprintf("update tried");
+    cprintf("update tried\n");
     acquire(&rmap.lock); 
     for (i = 0; i < MAX_RMAP_ENTRIES; i++) {
         entry =  &rmap.entries[i];
