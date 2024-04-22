@@ -6,67 +6,210 @@
 #include "mmu.h"
 #include "proc.h"
 #include "elf.h"
+#include "spinlock.h"
+#include "vm.h"
+#define NULL ((void *)0)
+// #define PA2IDX(pa) (((uint)(pa) / PGSIZE) % (MAX_RMAP_ENTRIES))
 
 extern char data[];  // defined by kernel.ld
 pde_t *kpgdir;  // for use in scheduler()
 
 // Set up CPU's kernel segment descriptors.
-// Run once on entry on each CPU.
-struct rmap_entry rmaps[MAX_RMAP_ENTRIES];
+// Run once on entry on each CPU.vmh
+RMap rmap; 
 
-
-void rmap_init() {
-    for (int i = 0; i < MAX_RMAP_ENTRIES; i++) {
-        rmaps[i].pa = 0;
-        rmaps[i].ref_count = 0;
+void rmap_init(void) {
+  initlock(&rmap.lock, "rmap");
+  // acquire(&rmap.lock);
+  for (int i = 0; i < MAX_RMAP_ENTRIES; i++) {
+    rmap.entries[i].ref_count = 0;
+    rmap.entries[i].pa = 0;
+    for (int j = 0; j < NPROC; j++) {
+      rmap.entries[i].procs[j] = NULL;
     }
+  }
+  // release(&rmap.lock);
 }
 
+int increment_rmap(uint pa, struct proc *p) {
+    acquire(&rmap.lock);
+    // int idx = PA2IDX(pa);  // Convert physical address to index
+    // struct rmap_entry *entry = &rmap.entries[idx];
+    int ans = -1;
 
-int rmap_increment(uint pa) {
     int free_index = -1;  // Store index of the first free slot
-
+    int found = 0;
     for (int i = 0; i < MAX_RMAP_ENTRIES; i++) {
-        if (rmaps[i].pa == pa && rmaps[i].ref_count > 0) {
-            rmaps[i].ref_count++;  // Increment ref count if pa found
-            return rmaps[i].ref_count;
+        if (rmap.entries[i].pa == pa && rmap.entries[i].ref_count > 0) {
+
+
+            for (int j = 0; j < NPROC; j++) {
+                if (rmap.entries[i].procs[j] == p) {
+                    rmap.entries[i].ref_count++;  // Increment ref count if pa found
+                    ans = rmap.entries[i].ref_count;
+                    found = 1;
+                   break;
+                }
+            }
+
+            if (!found) {
+                for (int j = 0; j < NPROC; j++) {
+                    if (rmap.entries[i].procs[j] == NULL) {
+                        rmap.entries[i].procs[j] = p;
+                        rmap.entries[i].ref_count++;  // Increment the ref count only if adding a new process
+                        ans = rmap.entries[i].ref_count;
+                        break;
+                    }
+                }
+            }
+            release(&rmap.lock);
+            return ans;
         }
-        if (rmaps[i].ref_count == 0 && free_index == -1) {
+        if (rmap.entries[i].ref_count == 0 && free_index == -1) {
             free_index = i;  // Remember first free slot
         }
     }
-
-    // If pa was not found and there is a free slot, use it
+    
     if (free_index != -1) {
-        rmaps[free_index].pa = pa;
-        rmaps[free_index].ref_count = 1;
-        return rmaps[free_index].ref_count;
+      rmap.entries[free_index].pa = pa;
+      rmap.entries[free_index].ref_count = 1;
+      rmap.entries[free_index].procs[0] = p;
+      ans = rmap.entries[free_index].ref_count;
+      release(&rmap.lock);
+      return ans;
     }
 
-    return -1; // No space in rmap and pa not found
+    // Check if the process is already associated with this page
+    // int found = 0;
+    // for (int i = 0; i < NPROC; i++) {
+        // if (entry->procs[i] == p) {
+            // found = 1;  // Process is already listed
+            // entry->ref_count++;  // Increment the ref count
+            // ans = entry->ref_count;
+            // break;
+        // }
+    // }
+
+    // If the process is not found, add it to the array
+    // if (!found) {
+        // for (int i = 0; i < NPROC; i++) {
+            // if (entry->procs[i] == NULL) {
+                // entry->procs[i] = p;
+                // entry->ref_count++;  // Increment the ref count only if adding a new process
+                // ans = entry->ref_count;
+                // break;
+            // }
+        // }
+    // }
+
+    release(&rmap.lock);
+    return ans;
 }
 
 
+int decrement_rmap(uint pa, struct proc *p) {
+  // int idx = PA2IDX(pa);
+  // struct rmap_entry *entry = &rmap.entries[idx];
+  int ans = -1;
+  if (p == NULL) {
+    return 0;
+  }
+  acquire(&rmap.lock);
 
-int rmap_decrement(uint pa) {
-    for (int i = 0; i < MAX_RMAP_ENTRIES; i++) {
-        if (rmaps[i].pa == pa) {  // Find the entry matching the physical address
-            if (rmaps[i].ref_count > 0) {
-                rmaps[i].ref_count--;  // Decrement the reference count
-                if (rmaps[i].ref_count == 0) {
-                    // Optional: Handle the case where no references remain
-                    // This could involve freeing the page, marking the entry as empty, etc.
-                    rmaps[i].pa = 0;  // Mark the entry as unused
-                }
-                return rmaps[i].ref_count;  // Success
-            } else {
-                // Error: trying to decrement a non-referenced page
-                return -1;  // Failure or error
-            }
+  for (int i = 0; i < MAX_RMAP_ENTRIES; i++) {
+    if (rmap.entries[i].pa == pa) {
+      if (rmap.entries[i].ref_count > 0) {
+        rmap.entries[i].ref_count--;  // Decrement ref count if pa found
+        ans = rmap.entries[i].ref_count;
+
+        // Remove process from the list
+        int done = 0;
+        for (int j = 0; j < NPROC; j++) {
+          if (rmap.entries[i].procs[j] == p) {
+            rmap.entries[i].procs[j] = NULL;
+            done = 1;
+            break;
+          }
         }
+        if (!done) {
+          panic("decrement_rmap: process not found in rmap entry");
+        }
+        if (rmap.entries[i].ref_count == 0) {
+          rmap.entries[i].pa = 0;  // Mark the entry as unused
+          rmap.entries[i].ref_count = 0;
+          for (int j = 0; j < NPROC; j++) {
+            rmap.entries[i].procs[j] = NULL;
+          }
+        }
+        release(&rmap.lock);
+        return ans;
+      } else {
+        // Error: trying to decrement a non-referenced page
+        panic("decrement_rmap: ref count is already 0");
+      }
     }
-    return -1; // No entry found for given physical address
+  }
+  // Remove process from the list
+  // for (int i = 0; i < NPROC; i++) {
+    // if (entry->procs[i] == p) {
+      // entry->procs[i] = NULL;
+      // break;
+    // }
+  // }
+  // if (--entry->ref_count < 0) {
+    // Optionally clear process references or handle zero reference cleanup
+    // entry->ref_count = 0;
+  // }
+  // ans = entry->ref_count;
+  release(&rmap.lock);
+  return ans;
 }
+
+
+// int rmap_increment(uint pa) {
+//     int free_index = -1;  // Store index of the first free slot
+
+//     for (int i = 0; i < NPDENTRIES_R * NPTENTRIES_R; i++) {
+//         if (rmaps[i].pa == pa && rmaps[i].ref_count > 0) {
+//             rmaps[i].ref_count++;  // Increment ref count if pa found
+//             return rmaps[i].ref_count;
+//         }
+//         if (rmaps[i].ref_count == 0 && free_index == -1) {
+//             free_index = i;  // Remember first free slot
+//         }
+//     }
+
+//     // If pa was not found and there is a free slot, use it
+//     if (free_index != -1) {
+//         rmaps[free_index].pa = pa;
+//         rmaps[free_index].ref_count = 1;
+//         return rmaps[free_index].ref_count;
+//     }
+
+//     return -1; // No space in rmap and pa not found
+// }
+
+
+
+// int rmap_decrement(uint pa) {
+//     for (int i = 0; i < MAX_RMAP_ENTRIES; i++) {
+//         if (rmaps[i].pa == pa) {  // Find the entry matching the physical address
+//             if (rmaps[i].ref_count > 0) {
+//                 rmaps[i].ref_count--;  // Decrement the reference count
+//                 if (rmaps[i].ref_count == 0) {
+//                     // Optional: Handle the case where no references remain
+//                     // This could involve freeing the page, marking the entry as empty, etc.
+//                     rmaps[i].pa = 0;  // Mark the entry as unused
+//                 }
+//                 return rmaps[i].ref_count;  // Success
+//             } else {
+//                 // Error: trying to decrement a non-referenced page
+//                 return -1;  // Failure or error
+//             }
+//         }
+//     }
+//     return -1; // No entry found for given physical address
+// }
 
 
 
@@ -193,7 +336,7 @@ setupkvm(void)
   for(k = kmap; k < &kmap[NELEM(kmap)]; k++)
     if(mappages(pgdir, k->virt, k->phys_end - k->phys_start,
                 (uint)k->phys_start, k->perm) < 0) {
-      freevm(pgdir);
+      freevm(pgdir, NULL);
       cprintf("lund tera");
       return 0;
     }
@@ -245,7 +388,7 @@ switchuvm(struct proc *p)
 // Load the initcode into address 0 of pgdir.
 // sz must be less than a page.
 void
-inituvm(pde_t *pgdir, char *init, uint sz)
+inituvm(pde_t *pgdir, char *init, uint sz, struct proc *p)
 {
   char *mem;
 
@@ -255,6 +398,8 @@ inituvm(pde_t *pgdir, char *init, uint sz)
   memset(mem, 0, PGSIZE);
   mappages(pgdir, 0, PGSIZE, V2P(mem), PTE_W|PTE_U);
   memmove(mem, init, sz);
+  increment_rmap(V2P(mem), p);
+
 }
 
 // Load a program segment into pgdir.  addr must be page-aligned
@@ -284,7 +429,7 @@ loaduvm(pde_t *pgdir, char *addr, struct inode *ip, uint offset, uint sz)
 // Allocate page tables and physical memory to grow process from oldsz to
 // newsz, which need not be page aligned.  Returns new size or 0 on error.
 int
-allocuvm(pde_t *pgdir, uint oldsz, uint newsz)
+allocuvm( pte_t * pgdir, uint oldsz, uint newsz,struct proc *p)
 {
   char *mem;
   uint a;
@@ -299,14 +444,23 @@ allocuvm(pde_t *pgdir, uint oldsz, uint newsz)
     mem = kalloc();
     if(mem == 0){
       cprintf("allocuvm out of memory\n");
-      deallocuvm(pgdir, newsz, oldsz);
+      deallocuvm(pgdir, newsz, oldsz,p );
       return 0;
     }
     memset(mem, 0, PGSIZE);
     if(mappages(pgdir, (char*)a, PGSIZE, V2P(mem), PTE_W|PTE_U) < 0){
       cprintf("allocuvm out of memory (2)\n");
-      deallocuvm(pgdir, newsz, oldsz);
+      deallocuvm(pgdir, newsz, oldsz, p);
       kfree(mem);
+      return 0;
+    }
+
+    // Increment the reference count for the page
+    if (increment_rmap(V2P(mem), p) == -1) {
+      cprintf("allocuvm: increment_rmap failed\n");
+      deallocuvm(pgdir, newsz, oldsz, p);
+      kfree(mem);
+      panic("allocuvm: increment_rmap failed");
       return 0;
     }
   }
@@ -318,7 +472,7 @@ allocuvm(pde_t *pgdir, uint oldsz, uint newsz)
 // need to be less than oldsz.  oldsz can be larger than the actual
 // process size.  Returns the new process size.
 int
-deallocuvm(pde_t *pgdir, uint oldsz, uint newsz)
+deallocuvm(pte_t * pgdir, uint oldsz, uint newsz,struct proc *p )
 {
   pte_t *pte;
   uint a, pa;
@@ -336,7 +490,16 @@ deallocuvm(pde_t *pgdir, uint oldsz, uint newsz)
       if(pa == 0)
         panic("kfree");
       char *v = P2V(pa);
-      kfree(v);
+      // decrement the reference count for the page
+      int ref_count = decrement_rmap(pa, p);
+      if ( ref_count == -1) {
+        cprintf("deallocuvm: decrement_rmap failed\n");
+        panic("deallocuvm: decrement_rmap failed");
+        return 0;
+      }
+      if (ref_count == 0) {
+        kfree(v);
+      }
       *pte = 0;
     }
   }
@@ -346,13 +509,13 @@ deallocuvm(pde_t *pgdir, uint oldsz, uint newsz)
 // Free a page table and all the physical memory pages
 // in the user part.
 void
-freevm(pde_t *pgdir)
+freevm(pde_t *pgdir, struct proc *p)
 {
   uint i;
 
   if(pgdir == 0)
     panic("freevm: no pgdir");
-  // deallocuvm(pgdir, KERNBASE, 0);
+  deallocuvm(pgdir, KERNBASE, 0, p);
   for(i = 0; i < NPDENTRIES; i++){
     if(pgdir[i] & PTE_P){
       char * v = P2V(PTE_ADDR(pgdir[i]));
@@ -414,7 +577,7 @@ clearpteu(pde_t *pgdir, char *uva)
 // Given a parent process's page table, create a copy
 // of it for a child using the Copy-On-Write (COW) approach.
 pde_t*
-copyuvm(pde_t *pgdir, uint sz)
+copyuvm(pde_t *pgdir, uint sz, struct proc *p)
 {
   pde_t *d;
   pte_t *pte , *new_pte;
@@ -442,6 +605,13 @@ copyuvm(pde_t *pgdir, uint sz)
 
     * new_pte = * pte;
 
+    
+    // increment rmap
+    if (increment_rmap(PTE_ADDR(*pte), p) == -1) {
+      cprintf("copyuvm: increment_rmap failed\n");
+      panic("copyuvm: increment_rmap failed");
+      return 0;
+    }
 
 
     // Duplicate the PTE for the child, also as read-only
@@ -454,6 +624,7 @@ copyuvm(pde_t *pgdir, uint sz)
     struct proc *curproc = myproc();
 
     switchuvm(curproc);
+    // lcr3(V2P(pgdir));
 
   return d;
 
@@ -534,11 +705,20 @@ int copy_on_write(void) {
         *pte = V2P(mem) | PTE_FLAGS(*pte) | PTE_W | PTE_P;  
 
         // Update the rmap if using a reference count system
-        // rmap_decrement(pa);
-        rmap_increment(V2P(mem));
+        // 
+        // Increment the reference count for the page
+        if (increment_rmap(V2P(mem), curproc) == -1) {
+            panic("copy_on_write: increment_rmap failed");
+        }
 
-        if (rmap_decrement(pa) == 0) {  // Check if this was the last reference
-            // *pte = 0;  // Clear the PTE if no more references to this page exist
+        // decrement the reference count for the page
+        int ref_count = decrement_rmap(pa, curproc);
+        if (ref_count == -1) {
+            panic("copy_on_write: decrement_rmap failed");
+        }
+
+        if (ref_count == 0) {
+            kfree(P2V(pa));
         }
 
         lcr3(V2P(curproc->pgdir));  // Refresh the TLB to reflect the PTE change

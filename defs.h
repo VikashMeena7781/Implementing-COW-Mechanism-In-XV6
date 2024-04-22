@@ -179,12 +179,12 @@ void            seginit(void);
 void            kvmalloc(void);
 pde_t*          setupkvm(void);
 char*           uva2ka(pde_t*, char*);
-int             allocuvm(pde_t*, uint, uint);
-int             deallocuvm(pde_t*, uint, uint);
-void            freevm(pde_t*);
-void            inituvm(pde_t*, char*, uint);
+int             allocuvm(pde_t*, uint, uint, struct proc *p);
+int             deallocuvm(pde_t*, uint, uint, struct proc *p);
+void            freevm(pde_t*, struct proc *p);
+void            inituvm(pde_t*, char*, uint, struct proc *p);
 int             loaduvm(pde_t*, char*, struct inode*, uint, uint);
-pde_t*          copyuvm(pde_t*, uint);
+pde_t*          copyuvm(pde_t*, uint, struct proc *p);
 void            switchuvm(struct proc*);
 void            switchkvm(void);
 int             copyout(pde_t*, uint, void*, uint);
@@ -193,12 +193,4 @@ void            clearpteu(pde_t *pgdir, char *uva);
 // number of elements in fixed-size array
 #define NELEM(x) (sizeof(x)/sizeof((x)[0]))
 
-struct rmap_entry {
-    uint pa;           // Physical address of the page
-    int ref_count;     // Reference count of how many processes use this page
-};
-
-#define MAX_RMAP_ENTRIES 1024
-extern struct rmap_entry rmaps[MAX_RMAP_ENTRIES];
-
-
+// declare NPROC and NPDENTRIES 
