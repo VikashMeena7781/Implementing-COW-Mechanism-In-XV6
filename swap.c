@@ -33,23 +33,26 @@
 
 // RMap rmap;
 
-struct swap_slot swap_slots[NSLOTS]; // NSLOTS is calculated based on NSWAPBLOCKS and the size of a swap slot
+struct swap_slot swap_slots[SWAPBLOCKS]; // NSLOTS is calculated based on NSWAPBLOCKS and the size of a swap slot
 
 void init_swap(void) {
-    for (int i = 0; i < NSLOTS; i++) {
+    for (int i = 0; i < SWAPBLOCKS; i++) {
         swap_slots[i].is_free = FREE; // Initially, all slots are free
         swap_slots[i].page_perm = 0; // Default permissions
     }
 }
 void update(pte_t *pte, int swap_slot);
+void update_swap_in(int swap_slot);
 
 int swapalloc(void) {
-    for (int i = 0; i < NSLOTS; i++) {
+    cprintf("allocating free slot\n");
+    for (int i = 0; i < SWAPBLOCKS; i++) {
         if (swap_slots[i].is_free == FREE) {
             swap_slots[i].is_free = OCCUPIED; // Mark the slot as occupied
             return i; // Return the index of the allocated slot
         }
     }
+    cprintf("%d\n",SWAPBLOCKS);
     return -1; // No free slot found
 }
 
@@ -64,7 +67,7 @@ void write_swap_block(int block_addr, char *data) {
 extern struct superblock sb;
 
 void write_swap_slot(char *page, int slot_index) {
-    if (slot_index < 0 || slot_index >= NSLOTS) {
+    if (slot_index < 0 || slot_index >= SWAPBLOCKS) {
         panic("Invalid swap slot index");
     }
     int block_addr = sb.swapstart + slot_index * 8; // Calculate starting block for this slot
@@ -73,13 +76,9 @@ void write_swap_slot(char *page, int slot_index) {
         write_swap_block(block_addr + i, page + (i * BSIZE));
     }
 }
-// When you're dealing with functions like write_swap_slot(char *page, int slot_index), the parameter page is expected to be the address of the start of a memory page. Inside such a function, you might perform operations that involve adding an offset to page, like page + (i * BSIZE), to access different parts of the memory page for reading or writing.
-
-//     This addition calculates the address of the block i blocks away from the start of page. It doesn't change page itself but computes a new address.
-//     This is how you iterate through the memory page in block-sized chunks, suitable for block-wise disk I/O operations.
 
 void read_swap_slot(char *page, int slot_index) {
-    if (slot_index < 0 || slot_index >= NSLOTS) {
+    if (slot_index < 0 || slot_index >= SWAPBLOCKS) {
         panic("Invalid swap slot index");
     }
     int block_addr = sb.swapstart + slot_index * 8; // Calculate starting block for this slot
@@ -103,7 +102,7 @@ char* swap_out(){
         cprintf("Free swap slot found\n");
         struct proc* victim_proc = get_victim_proc();
         cprintf("Victim process found\n");
-        victim_proc->rss-=PGSIZE;
+        // victim_proc->rss-=PGSIZE;
 
         pte_t* victim_page = get_victim_page(victim_proc);
         cprintf("Victim page found\n");
@@ -127,18 +126,22 @@ char* swap_out(){
 void swap_in(){
     cprintf("swap in\n");
     struct proc *curproc = myproc();
+    // CR2 holds the linear address that caused a page fault. 
     uint addr = rcr2();
     pde_t *pgdir = curproc->pgdir;
     pte_t *pte = walkpgdir(pgdir, (char*)addr, 0); 
     int swap_slot_no = *pte >> 12;
-    struct swap_slot swap_slot = swap_slots[swap_slot_no];
-    uint perms = swap_slot.page_perm;
-    char *mem=kalloc() ;    
-    read_swap_slot(mem, swap_slot_no); 
-    *pte=V2P(mem) | perms | PTE_P ; 
-    pte = walkpgdir(pgdir, (char*)addr, 0); 
-    swap_slots[swap_slot_no].is_free = FREE;
-    curproc->rss+= PGSIZE;
+    update_swap_in(swap_slot_no);
+    // struct swap_slot swap_slot = swap_slots[swap_slot_no];
+    // uint perms = swap_slot.page_perm;
+    // char *mem=kalloc() ;    
+    // read_swap_slot(mem, swap_slot_no); 
+    // *pte=V2P(mem) | perms | PTE_P ; 
+    // // just to ensure that updates reflects
+    // pte = walkpgdir(pgdir, (char*)addr, 0); 
+
+    // swap_slots[swap_slot_no].is_free = FREE;
+    // curproc->rss+= PGSIZE;
 }
 
 
@@ -150,7 +153,7 @@ void clear_swap_slot(void){
         pte_t *pte = walkpgdir(pgdir, (void*)va, 0); 
         if(pte && (*pte & PTE_swapped)) {
             int swap_slot_no=*pte >> 12;
-            swap_slots[swap_slot_no].is_free=1;
+            swap_slots[swap_slot_no].is_free=FREE;
         }
         
     }
@@ -177,6 +180,8 @@ void update(pte_t *pte, int swap_slot) {
                     if ((proc_pte != 0) && (*proc_pte & PTE_P)) {
                         // Set the PTE to indicate that the page is now swapped out
                         *proc_pte = (swap_slot << 12) | PTE_swapped;
+
+                        entry->procs[j]->rss-=PGSIZE;
                         // *proc_pte &= ~PTE_P;
                         lcr3(V2P(entry->procs[j]->pgdir));
                     }
@@ -199,3 +204,69 @@ void update(pte_t *pte, int swap_slot) {
 
 // TO DO: change increment, decrement for swapped entries, swap in tell all processes 
 
+void update_swap_in(int swap_slot) {
+    struct swap_slot* slot = &swap_slots[swap_slot];
+    if (slot->is_free == FREE) {
+        panic("update_swap_in: slot is already free");
+    }
+
+    char *mem = kalloc();  
+    if (!mem) {
+        panic("update_swap_in: unable to allocate memory");
+    }
+    read_swap_slot(mem, swap_slot); 
+
+    uint perms = slot->page_perm;
+    struct rmap_entry *entry = &slot->swap_rmap;
+
+    acquire(&rmap.lock);  
+
+    // Iterate over all processes that might be using this page
+    for (int j = 0; j < NPROC; j++) {
+        struct proc *p = entry->procs[j];
+        if (p) {
+            // not sure about this line
+            pte_t *pte = walkpgdir(p->pgdir, (void*)P2V(entry->pa), 0);
+            if (pte && (*pte & PTE_swapped)) {
+                // Clear the swap indication and update the page table
+                *pte = V2P(mem) | perms | PTE_P;  // Set the physical address and permissions
+                lcr3(V2P(p->pgdir));  // Flush the TLB to ensure the changes take effect
+                p->rss+=PGSIZE;
+            }else{
+                panic("Page should be marked swapped_out\n");
+            }
+        }
+    }
+
+    slot->is_free = FREE;
+    slot->page_perm = 0;
+
+    // add in rmap
+    int found_index = -1;
+    for (int i = 0; i < MAX_RMAP_ENTRIES; i++) {
+        if (rmap.entries[i].ref_count == 0) {  
+            found_index = i;
+            break;
+        }
+    }
+
+    if (found_index == -1) {
+        panic("update_swap_in: No free rmap entry found");
+    }
+
+    // Copy the swap slot's rmap_entry to the found index in the original rmap
+    // Not sure about this line
+    entry->pa=(uint)V2P(mem);
+    rmap.entries[found_index] = *entry;
+
+
+    // clear from swap_slot
+    entry->ref_count = 0;    
+    entry->pa = 0;          
+    for (int i = 0; i < NPROC; i++) {
+        entry->procs[i] = NULL;
+    }
+
+    release(&rmap.lock);  // Release the lock
+
+}
