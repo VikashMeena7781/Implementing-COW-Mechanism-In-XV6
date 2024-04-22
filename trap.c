@@ -64,8 +64,12 @@ trap(struct trapframe *tf)
     // Bochs generates spurious IDE1 interrupts.
     break;
   case T_PGFLT:
-    if (copy_on_write()) break;
+    if (copy_on_write()) 
+     {lapiceoi();
+     break;}
 
+    swap_in();
+    lapiceoi();
     // swap
     break;
 
