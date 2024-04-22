@@ -8,7 +8,7 @@
 #include "elf.h"
 #include "spinlock.h"
 #include "vm.h"
-#define NULL ((void *)0)
+// #define NULL ((void *)0)
 // #define PA2IDX(pa) (((uint)(pa) / PGSIZE) % (MAX_RMAP_ENTRIES))
 
 extern char data[];  // defined by kernel.ld
@@ -41,12 +41,11 @@ int increment_rmap(uint pa, struct proc *p) {
     int found = 0;
     for (int i = 0; i < MAX_RMAP_ENTRIES; i++) {
         if (rmap.entries[i].pa == pa && rmap.entries[i].ref_count > 0) {
-
-
             for (int j = 0; j < NPROC; j++) {
                 if (rmap.entries[i].procs[j] == p) {
                     rmap.entries[i].ref_count++;  // Increment ref count if pa found
                     ans = rmap.entries[i].ref_count;
+                    panic("Process already exists\n");
                     found = 1;
                    break;
                 }
@@ -725,7 +724,7 @@ int copy_on_write(void) {
 
         return 1;  // Handled a COW page fault
     }
-    else panic("page writeable or not present");
+    // else panic("page writeable or not present");
 
     // The page fault was not due to a COW scenario
     return 0;

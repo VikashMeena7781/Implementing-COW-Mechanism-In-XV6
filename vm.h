@@ -4,7 +4,6 @@
 
 
 
-
 #define NPROC_R 64
 #define NPDENTRIES_R 1024
 #define NPTENTRIES_R 1024
@@ -20,5 +19,6 @@ typedef struct {
     struct rmap_entry entries[MAX_RMAP_ENTRIES];
 } RMap;
 
-extern RMap rmap;  
+extern RMap rmap; 
+
 

@@ -1,13 +1,19 @@
 #define SWAP_SLOT_SIZE 8 // Each swap slot takes up 8 blocks
 #define NSLOTS 286 //total number of slots 32
-#define PTE_swapped     0x008   // Swapped  
+// #define PTE_swapped     0x008   // Swapped  
 #define FREE 1
 #define OCCUPIED 0
-#include "types.h"
+// #include "types.h"
+// #include "spinlock.h"
+// #include "vm.h"
+
+
+struct rmap_entry;
 
 struct swap_slot {
   uint page_perm; // Permission of the swapped memory page
   uint is_free;   // Indicates if the swap slot is free (0) or in use (1)
+  struct rmap_entry swap_rmap;
 };
 
 
@@ -25,6 +31,8 @@ void read_page_from_swap(int slot_id, void* page_data);
 
 void clear_swap_slot(void);
 
+char* swap_out();
+void swap_in();
 
 // static uint
 // balloc(uint dev)

@@ -8,6 +8,7 @@
 #include "memlayout.h"
 #include "mmu.h"
 #include "spinlock.h"
+#include "swap.h"
 
 void freerange(void *vstart, void *vend);
 extern char end[]; // first address after kernel loaded from ELF file
@@ -85,26 +86,68 @@ kfree(char *v)
 // Allocate one 4096-byte page of physical memory.
 // Returns a pointer that the kernel can use.
 // Returns 0 if the memory cannot be allocated.
-char*
-kalloc(void)
-{
+// char*
+// kalloc(void)
+// {
+//   struct run *r;
+
+//   if(kmem.use_lock)
+//     acquire(&kmem.lock);
+//   r = kmem.freelist;
+//   if(r)
+//   {
+//     kmem.freelist = r->next;
+//     kmem.num_free_pages-=1;
+//   }
+//   if (kmem.num_free_pages<1){
+//     cprintf( "Out of memory\n");
+//   }
+//   if(kmem.use_lock)
+//     release(&kmem.lock);
+//   return (char*)r;
+// }
+
+char* kalloc(void) {
   struct run *r;
 
   if(kmem.use_lock)
     acquire(&kmem.lock);
+
+  // Attempt to allocate a page as usual
   r = kmem.freelist;
-  if(r)
-  {
+  if (r) {
     kmem.freelist = r->next;
-    kmem.num_free_pages-=1;
+    kmem.num_free_pages -= 1;
+  } else {
+    if (kmem.use_lock)
+        release(&kmem.lock);
+    
+    // No free page available, attempt to swap out a page
+    char* victim_page = swap_out();
+    kfree(victim_page);
+    // cprintf("victim_page: %x\n", victim_page);
+    return kalloc();
+    if (victim_page != 0) {
+      // After swapping out, there should be a free page now. Allocate it.
+      r = kmem.freelist;
+      if (r) {
+        kmem.freelist = r->next;
+        kmem.num_free_pages -= 1;
+      }
+    } else {
+      // swap_out() couldn't free any page, return null
+      if (kmem.use_lock)
+        release(&kmem.lock);
+      return 0;
+    }
   }
-  if (kmem.num_free_pages<1){
-    cprintf( "Out of memory\n");
-  }
+
   if(kmem.use_lock)
     release(&kmem.lock);
   return (char*)r;
 }
+
+
 uint 
 num_of_FreePages(void)
 {

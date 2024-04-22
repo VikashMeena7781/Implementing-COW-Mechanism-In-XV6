@@ -1,15 +1,37 @@
-#include "swap.h"
-#include "defs.h"
-#include "types.h"
-#include "spinlock.h"  // Defines struct spinlock
-#include "sleeplock.h" // Uses struct spinlock
-#include "fs.h"
-#include "mmu.h"
+// // #include "swap.h"
+// #include "defs.h"
+// #include "types.h"
+// #include "spinlock.h"  // Defines struct spinlock
+// #include "vm.h"   // Def
+// #include "swap.h"
+// #include "sleeplock.h" // Uses struct spinlock
+// #include "fs.h"
+// #include "mmu.h"
+// #include "param.h"
+// #include "buf.h"
+// #include "proc.h"
+// #include "memlayout.h"
+// #include "x86.h"
+// // #include "vm.h"
+
+
 #include "param.h"
-#include "buf.h"
-#include "proc.h"
-#include "memlayout.h"
+#include "types.h"
+#include "defs.h"
 #include "x86.h"
+#include "memlayout.h"
+#include "mmu.h"
+#include "proc.h"
+#include "elf.h"
+#include "spinlock.h"
+#include "fs.h"
+#include "sleeplock.h"
+#include "buf.h"
+#include "vm.h"
+#include "swap.h"
+
+
+// RMap rmap;
 
 struct swap_slot swap_slots[NSLOTS]; // NSLOTS is calculated based on NSWAPBLOCKS and the size of a swap slot
 
@@ -19,7 +41,7 @@ void init_swap(void) {
         swap_slots[i].page_perm = 0; // Default permissions
     }
 }
-
+void update(pte_t *pte, int swap_slot);
 
 int swapalloc(void) {
     for (int i = 0; i < NSLOTS; i++) {
@@ -89,10 +111,12 @@ char* swap_out(){
 
         swap_slots[swap_slot].page_perm = PTE_FLAGS(*victim_page);
 
+        update(victim_page,swap_slot);
+
         write_swap_slot(page,swap_slot);
         cprintf("Swap slot written\n");
         // page table entry  of victim process's page..
-        *victim_page = (swap_slot << 12) | PTE_swapped;
+        // *victim_page = (swap_slot << 12) | PTE_swapped;
         lcr3(V2P(current_proc->pgdir));
         cprintf("Page table entry updated\n");
         return page;
@@ -132,3 +156,46 @@ void clear_swap_slot(void){
     }
 
 }
+
+
+void update(pte_t *pte, int swap_slot) {
+    uint pa = PTE_ADDR(*pte); // Extract the physical address from the page table entry
+    struct rmap_entry *entry;
+    int i, j;
+    cprintf("update tried");
+    acquire(&rmap.lock); 
+    for (i = 0; i < MAX_RMAP_ENTRIES; i++) {
+        entry =  &rmap.entries[i];
+        if (entry->pa == pa) { 
+            swap_slots[swap_slot].swap_rmap = *entry; // Deep copy the rmap entry
+            // swap_slots[swap_slot].is_free = 0; 
+            for (j = 0; j < NPROC; j++) {
+                if (entry->procs[j] != NULL) {
+                    pte_t *proc_pte;
+                    // Not sure about this line 
+                    proc_pte = walkpgdir(entry->procs[j]->pgdir, (void*)P2V(pa), 0);
+                    if ((proc_pte != 0) && (*proc_pte & PTE_P)) {
+                        // Set the PTE to indicate that the page is now swapped out
+                        *proc_pte = (swap_slot << 12) | PTE_swapped;
+                        // *proc_pte &= ~PTE_P;
+                        lcr3(V2P(entry->procs[j]->pgdir));
+                    }
+                }
+            }
+            // Clear the original rmap entry manually using a loop
+            entry->pa = 0;
+            entry->ref_count = 0;
+            for (j = 0; j < NPROC; j++) {
+                entry->procs[j] = NULL;
+            }
+
+            break; // Exit the loop once the entry is processed
+        }
+    }
+    release(&rmap.lock); // Release the lock
+}
+
+
+
+// TO DO: change increment, decrement for swapped entries, swap in tell all processes 
+

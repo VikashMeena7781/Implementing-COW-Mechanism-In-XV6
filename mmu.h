@@ -101,6 +101,11 @@ struct segdesc {
 #define PTE_ADDR(pte)   ((uint)(pte) & ~0xFFF)
 #define PTE_FLAGS(pte)  ((uint)(pte) &  0xFFF)
 
+// define null
+#define NULL ((void *)0)
+#define PTE_swapped     0x008   // Swapped  
+
+
 #ifndef __ASSEMBLER__
 typedef uint pte_t;
 
