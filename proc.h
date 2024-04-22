@@ -57,3 +57,6 @@ struct proc {
 //   original data and bss
 //   fixed-size stack
 //   expandable heap
+struct proc* get_victim_proc(void);
+pte_t* get_victim_page(struct proc* victim_process);
+pte_t *walkpgdir(pde_t *pgdir, const void *va, int alloc);
