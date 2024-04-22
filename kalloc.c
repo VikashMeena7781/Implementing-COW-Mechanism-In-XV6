@@ -8,6 +8,7 @@
 #include "memlayout.h"
 #include "mmu.h"
 #include "spinlock.h"
+#include "vm.h"
 #include "swap.h"
 
 void freerange(void *vstart, void *vend);
@@ -123,6 +124,7 @@ char* kalloc(void) {
         release(&kmem.lock);
     
     // No free page available, attempt to swap out a page
+    cprintf("No free page available, attempting to swap out a page\n");
     char* victim_page = swap_out();
     kfree(victim_page);
     // cprintf("victim_page: %x\n", victim_page);

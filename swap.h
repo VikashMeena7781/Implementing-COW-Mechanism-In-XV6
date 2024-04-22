@@ -17,6 +17,7 @@ struct swap_slot {
 };
 
 
+extern struct swap_slot swap_slots[NSLOTS]; // NSLOTS is calculated based on NSWAPBLOCKS and the size of a swap slot
 // todo read and write functions
 
 // extern struct swap_slot swap_slots[NSLOTS]; // NSLOTS is calculated based on NSWAPBLOCKS and the size of a swap slot
