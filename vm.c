@@ -8,6 +8,7 @@
 #include "elf.h"
 #include "spinlock.h"
 #include "vm.h"
+#include "swap.h"
 // #define NULL ((void *)0)
 // #define PA2IDX(pa) (((uint)(pa) / PGSIZE) % (MAX_RMAP_ENTRIES))
 
@@ -19,7 +20,13 @@ pde_t *kpgdir;  // for use in scheduler()
 RMap rmap; 
 
 void rmap_init(void) {
+  cprintf("rmap_init\n");
   initlock(&rmap.lock, "rmap");
+  for (int i = 0; i < MAX_RMAP_ENTRIES; i++) {
+    char * name = "rmap_entry_" + i;
+    cprintf("name: %s\n", name);
+    initlock(&rmap.entries[i].lock, name);
+  }
   // acquire(&rmap.lock);
   for (int i = 0; i < MAX_RMAP_ENTRIES; i++) {
     rmap.entries[i].ref_count = 0;
@@ -31,7 +38,46 @@ void rmap_init(void) {
   // release(&rmap.lock);
 }
 
-int increment_rmap(uint pa, struct proc *p) {
+int increment_rmap(pte_t * pte, struct proc *p) {
+
+    // check if pte is swapped
+    if (*pte & PTE_swapped) {
+      // get swap block 
+      int swap_slot_no = *pte >> 12;
+      struct swap_slot swap_slot = swap_slots[swap_slot_no];
+
+      struct rmap_entry entry = swap_slot.swap_rmap;
+      int ans = -1;
+  // Store index of the first free slot
+          int found = 0;
+
+      // acquire lock
+      acquire(&entry.lock);
+      for (int j = 0; j < NPROC; j++) {
+                if (entry.procs[j] == p) {
+                    entry.ref_count++;  // Increment ref count if pa found
+                    ans = entry.ref_count;
+                    panic("Process already exists\n");
+                    found = 1;
+                   break;
+                }
+            }
+
+            if (!found) {
+                for (int j = 0; j < NPROC; j++) {
+                    if (entry.procs[j] == NULL) {
+                        entry.procs[j] = p;
+                        entry.ref_count++;  // Increment the ref count only if adding a new process
+                        ans = entry.ref_count;
+                        break;
+                    }
+                }
+            }
+            release(&entry.lock);
+            return ans;
+    }
+
+    uint pa = PTE_ADDR(*pte);
     acquire(&rmap.lock);
     // int idx = PA2IDX(pa);  // Convert physical address to index
     // struct rmap_entry *entry = &rmap.entries[idx];
@@ -106,7 +152,36 @@ int increment_rmap(uint pa, struct proc *p) {
 }
 
 
-int decrement_rmap(uint pa, struct proc *p) {
+int decrement_rmap(pte_t * pte, struct proc *p) {
+  if (*pte & PTE_swapped) {
+    // Handle swap case
+    int swap_slot_no = *pte >> 12;
+    struct swap_slot swap_slot = swap_slots[swap_slot_no];
+    struct rmap_entry entry = swap_slot.swap_rmap;
+    int ans = -1;
+    acquire(&entry.lock);
+    for (int i = 0; i < NPROC; i++) {
+      if (entry.procs[i] == p) {
+        entry.procs[i] = NULL;
+        entry.ref_count--;
+        ans = entry.ref_count;
+        if (entry.ref_count == 0) {
+          entry.pa = 0;  // Mark the entry as unused
+          entry.ref_count = 0;
+          for (int j = 0; j < NPROC; j++) {
+            entry.procs[j] = NULL;
+          }
+          swap_slot.is_free = FREE;
+        }
+        
+      }
+    }
+      release(&entry.lock);
+      return ans;
+
+  }
+
+  uint pa = PTE_ADDR(*pte);
   // int idx = PA2IDX(pa);
   // struct rmap_entry *entry = &rmap.entries[idx];
   int ans = -1;
@@ -397,7 +472,9 @@ inituvm(pde_t *pgdir, char *init, uint sz, struct proc *p)
   memset(mem, 0, PGSIZE);
   mappages(pgdir, 0, PGSIZE, V2P(mem), PTE_W|PTE_U);
   memmove(mem, init, sz);
-  increment_rmap(V2P(mem), p);
+  // pte from mem
+  pte_t * pt = walkpgdir(pgdir, mem, 0);
+  increment_rmap(pt, p);
 
 }
 
@@ -453,9 +530,9 @@ allocuvm( pte_t * pgdir, uint oldsz, uint newsz,struct proc *p)
       kfree(mem);
       return 0;
     }
-
+    pte_t * pt = walkpgdir(pgdir, (char*)mem, 0);
     // Increment the reference count for the page
-    if (increment_rmap(V2P(mem), p) == -1) {
+    if (increment_rmap(pt, p) == -1) {
       cprintf("allocuvm: increment_rmap failed\n");
       deallocuvm(pgdir, newsz, oldsz, p);
       kfree(mem);
@@ -490,7 +567,7 @@ deallocuvm(pte_t * pgdir, uint oldsz, uint newsz,struct proc *p )
         panic("kfree");
       char *v = P2V(pa);
       // decrement the reference count for the page
-      int ref_count = decrement_rmap(pa, p);
+      int ref_count = decrement_rmap(pte, p);
       if ( ref_count == -1) {
         cprintf("deallocuvm: decrement_rmap failed\n");
         panic("deallocuvm: decrement_rmap failed");
@@ -606,7 +683,7 @@ copyuvm(pde_t *pgdir, uint sz, struct proc *p)
 
     
     // increment rmap
-    if (increment_rmap(PTE_ADDR(*pte), p) == -1) {
+    if (increment_rmap(pte, p) == -1) {
       cprintf("copyuvm: increment_rmap failed\n");
       panic("copyuvm: increment_rmap failed");
       return 0;
@@ -700,18 +777,19 @@ int copy_on_write(void) {
         //     kfree(mem);
         //     panic("copy_on_write: mappages failed");
         // }
+        int ref_count = decrement_rmap(pte, curproc);
 
         *pte = V2P(mem) | PTE_FLAGS(*pte) | PTE_W | PTE_P;  
 
         // Update the rmap if using a reference count system
         // 
         // Increment the reference count for the page
-        if (increment_rmap(V2P(mem), curproc) == -1) {
+        if (increment_rmap(pte, curproc) == -1) {
             panic("copy_on_write: increment_rmap failed");
         }
 
         // decrement the reference count for the page
-        int ref_count = decrement_rmap(pa, curproc);
+        
         if (ref_count == -1) {
             panic("copy_on_write: decrement_rmap failed");
         }

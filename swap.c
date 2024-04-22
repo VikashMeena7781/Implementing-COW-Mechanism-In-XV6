@@ -58,10 +58,23 @@ int swapalloc(void) {
 
 
 void write_swap_block(int block_addr, char *data) {
-    struct buf *b = bread(0, block_addr); // Load the block from disk into buffer cache
-    memmove(b->data, data, BSIZE);   // Copy data to the buffer block
+    cprintf("Swap block writing\n");
+    struct buf *b = bread(ROOTDEV, block_addr); // Load the block from disk into buffer cache
+    // acquire(&rmap.lock); // Acquire the lock for the buffer block
+    cprintf("Swap block read\n");
+    if (holding(&rmap.lock) == 0) {
+        cprintf("rmap lock is not held\n");
+    }
+    else {
+        cprintf("rmap lock is held\n");
+    }
+    cprintf("data: %s\n", data);
+    memmove(b->data, data,   BSIZE);   // Copy data to the buffer block
+    cprintf("Data copied to buffer block\n");
+    // release(&rmap.lock); // Release the lock for the buffer block
     bwrite(b);    // Write the buffer block back to disk
     brelse(b);    // Release the buffer block
+    cprintf("Swap block released\n");
 }
 
 extern struct superblock sb;
@@ -84,7 +97,8 @@ void read_swap_slot(char *page, int slot_index) {
     int block_addr = sb.swapstart + slot_index * 8; // Calculate starting block for this slot
     for (int i = 0; i < 8; i++) {
         cprintf("Reading swap slot block %d\n", block_addr + i);
-        struct buf *b = bread(0, block_addr + i); // Read the block from disk into buffer cache
+        struct buf *b = bread(ROOTDEV, block_addr + i); // Read the block from disk into buffer cache
+
         memmove(page + (i * BSIZE), b->data, BSIZE); // Copy data from the buffer block to page
         brelse(b); // Release the buffer block
     }
@@ -110,9 +124,11 @@ char* swap_out(){
 
         swap_slots[swap_slot].page_perm = PTE_FLAGS(*victim_page);
 
-        update(victim_page,swap_slot);
-
         write_swap_slot(page,swap_slot);
+        update(victim_page,swap_slot);
+        cprintf("Page updated\n");
+        // acquire(&rmap.lock);
+        // release(&rmap.lock);
         cprintf("Swap slot written\n");
         // page table entry  of victim process's page..
         // *victim_page = (swap_slot << 12) | PTE_swapped;
@@ -198,6 +214,7 @@ void update(pte_t *pte, int swap_slot) {
         }
     }
     release(&rmap.lock); // Release the lock
+    cprintf("update done");
 }
 
 
@@ -205,21 +222,23 @@ void update(pte_t *pte, int swap_slot) {
 // TO DO: change increment, decrement for swapped entries, swap in tell all processes 
 
 void update_swap_in(int swap_slot) {
+    cprintf("update in swap in\n");
     struct swap_slot* slot = &swap_slots[swap_slot];
     if (slot->is_free == FREE) {
         panic("update_swap_in: slot is already free");
     }
 
-    char *mem = kalloc();  
+    char *mem = kalloc(); 
+    cprintf("memory allocated after kalloc\n"); 
     if (!mem) {
         panic("update_swap_in: unable to allocate memory");
     }
-    read_swap_slot(mem, swap_slot); 
-
     uint perms = slot->page_perm;
     struct rmap_entry *entry = &slot->swap_rmap;
 
     acquire(&rmap.lock);  
+    read_swap_slot(mem, swap_slot); 
+    cprintf("swap in slot read\n");
 
     // Iterate over all processes that might be using this page
     for (int j = 0; j < NPROC; j++) {
