@@ -24,10 +24,13 @@ initlock(struct spinlock *lk, char *name)
 void
 acquire(struct spinlock *lk)
 {
+  
+  // cprintf("lock name acquired: %s\n", lk->name);
   pushcli(); // disable interrupts to avoid deadlock.
   if(holding(lk))
-    // {cprintf("name: %s\n", lk->name);
-      panic("acquire");
+    // {//
+    // lk->name;
+      panic(lk->name);
 
   // The xchg is atomic.
   while(xchg(&lk->locked, 1) != 0)

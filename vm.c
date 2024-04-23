@@ -42,6 +42,7 @@ int increment_rmap(pte_t * pte, struct proc *p) {
 
     // check if pte is swapped
     if (*pte & PTE_swapped) {
+      cprintf("increment_rmap of swapped page: PTE_swapped\n");
       // get swap block 
       int swap_slot_no = *pte >> 12;
       struct swap_slot swap_slot = swap_slots[swap_slot_no];
@@ -57,7 +58,7 @@ int increment_rmap(pte_t * pte, struct proc *p) {
                 if (entry.procs[j] == p) {
                     entry.ref_count++;  // Increment ref count if pa found
                     ans = entry.ref_count;
-                    panic("Process already exists\n");
+                    panic("Process already exists and page swapped\n");
                     found = 1;
                    break;
                 }
@@ -89,9 +90,9 @@ int increment_rmap(pte_t * pte, struct proc *p) {
         if (rmap.entries[i].pa == pa && rmap.entries[i].ref_count > 0) {
             for (int j = 0; j < NPROC; j++) {
                 if (rmap.entries[i].procs[j] == p) {
-                    rmap.entries[i].ref_count++;  // Increment ref count if pa found
+                    // rmap.entries[i].ref_count++;  // Increment ref count if pa found
                     ans = rmap.entries[i].ref_count;
-                    panic("Process already exists\n");
+                    // panic("Process already exists\n");
                     found = 1;
                    break;
                 }
@@ -155,6 +156,8 @@ int increment_rmap(pte_t * pte, struct proc *p) {
 int decrement_rmap(pte_t * pte, struct proc *p) {
   if (*pte & PTE_swapped) {
     // Handle swap case
+      cprintf("decrement of swapped page: PTE_swapped\n");
+
     int swap_slot_no = *pte >> 12;
     struct swap_slot swap_slot = swap_slots[swap_slot_no];
     struct rmap_entry entry = swap_slot.swap_rmap;
@@ -753,8 +756,17 @@ int copy_on_write(void) {
 
     // Get the page table entry for the faulting address
     if ((pte = walkpgdir(curproc->pgdir, (void *)faulting_addr, 0)) == 0) {
+        if (*pte & PTE_swapped) {
+          // cprintf("swapped page\n");
+        panic("copy_on_write: pte should exist page swapped\n");
+          // return 0;
+        }
+        // cprintf("copy_on_write: pte should exist not swapped page\n");
+        // return 0;
         panic("copy_on_write: pte should exist\n");
+
     }
+    // cprintf("copy_on_write: pte: %p\n", *pte);
 
     // Check if the fault was due to a write attempt on a read-only page
     if (!(*pte & PTE_W) && (*pte & PTE_P)) {
@@ -801,7 +813,7 @@ int copy_on_write(void) {
         return 1;  // Handled a COW page fault
     }
     // else panic("page writeable or not present");
-
+    // cprintf("copy_on_write: page writeable or not present\n");
     // The page fault was not due to a COW scenario
     return 0;
 }
