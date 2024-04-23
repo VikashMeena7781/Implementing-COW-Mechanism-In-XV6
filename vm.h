@@ -10,7 +10,7 @@
 
 struct rmap_entry {
   uint pa;        // Physical address
-  bitmap procbitmap [NPROC_R];  // Array of pointers to processes
+  bitmap procbitmap;  // Array of pointers to processes
 };
 
 typedef struct {
@@ -20,4 +20,12 @@ typedef struct {
 
 extern RMap rmap; 
 
+unsigned int getcount(unsigned long long n) {
+    unsigned int count = 0;
+    while (n) {
+        n &= (n - 1);  // clear the least significant bit set
+        count++;
+    }
+    return count;
+}
 
