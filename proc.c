@@ -103,6 +103,7 @@ found:
   // Leave room for trap frame.
   sp -= sizeof *p->tf;
   p->tf = (struct trapframe*)sp;
+  p->rss = PGSIZE;
 
   // Set up new context to start executing at forkret,
   // which returns to trapret.
@@ -165,6 +166,7 @@ growproc(int n)
   struct proc *curproc = myproc();
 
   sz = curproc->sz;
+
   if(n > 0){
     if((sz = allocuvm(curproc->pgdir, sz, sz + n, curproc)) == 0)
       return -1;
@@ -172,6 +174,7 @@ growproc(int n)
     if((sz = deallocuvm(curproc->pgdir, sz, sz + n, curproc)) == 0)
       return -1;
   }
+  curproc->rss += n;
   curproc->sz = sz;
   switchuvm(curproc);
   return 0;
@@ -341,15 +344,15 @@ struct proc* get_victim_proc(void){
   acquire(&ptable.lock);
   for (p = ptable.proc; p < &ptable.proc[NPROC]; p++) {
     if(mem_size==0){
-      mem_size=p->sz;
+      mem_size=p->rss;
       victim_process=p;
     }
-    else if(p->sz > mem_size) {
+    else if(p->rss > mem_size) {
       victim_process = p;
-      mem_size = p->sz;
-    }else if (p->sz == mem_size && victim_process->pid > p->pid) {
+      mem_size = p->rss;
+    }else if (p->rss == mem_size && victim_process->pid > p->pid) {
       victim_process = p;
-      mem_size = p->sz;
+      mem_size = p->rss;
     }
   }
   release(&ptable.lock);
@@ -360,13 +363,15 @@ struct proc* get_victim_proc(void){
 
 pte_t* get_victim_page(struct proc* victim_process) {
   pte_t *victim_page;
+  // cprintf("hereeeeeee\n");
   // Find the victim page within the victim process
   int accessed_page=0;
   for (uint i = 0; i < victim_process->sz; i += PGSIZE) {
     victim_page = walkpgdir(victim_process->pgdir, (char*)i, 0);
-    if (victim_page && (*victim_page & PTE_P) && !(*victim_page & PTE_A)) {
+    if (victim_page && (*victim_page & PTE_P) && !(*victim_page & PTE_A) && (*victim_page & PTE_U)) {
+      // cprintf("accessed page %d\n",accessed_page);
       return victim_page;
-    }else if(victim_page && (*victim_page & PTE_P) && (*victim_page & PTE_A)){
+    }else if(victim_page && (*victim_page & PTE_P) && (*victim_page & PTE_A)  && (*victim_page & PTE_U)){
       accessed_page +=1;
     }
   }
@@ -374,8 +379,9 @@ pte_t* get_victim_page(struct proc* victim_process) {
   accessed_page = (accessed_page + 9) /10;
   for (uint i = 0 ; i < victim_process->sz ; i+= PGSIZE ){
     victim_page = walkpgdir(victim_process->pgdir,(char*)i,0);
-    if (victim_page && (*victim_page & PTE_P) && (*victim_page & PTE_A))
+    if (victim_page && (*victim_page & PTE_P) && (*victim_page & PTE_A) && (*victim_page & PTE_U))
     {
+      // cprintf("accessed page turned off %p\n",* victim_page);
       *victim_page &= ~PTE_A;
       accessed_page--;
     }
@@ -384,6 +390,18 @@ pte_t* get_victim_page(struct proc* victim_process) {
       break;
     }
   }
+
+  // cprintf("accesed page %d\n",accessed_page);
+
+  for (uint i = 0; i < victim_process->sz; i += PGSIZE) {
+    victim_page = walkpgdir(victim_process->pgdir, (char*)i, 0);
+    if (victim_page && (*victim_page & PTE_P) && !(*victim_page & PTE_A) && (*victim_page & PTE_U)) {
+      return victim_page;
+    }else if(victim_page && (*victim_page & PTE_P) && (*victim_page & PTE_A) && (*victim_page & PTE_U)){
+      accessed_page +=1;
+    }
+  }
+  panic("No victim page found");
   return get_victim_page(victim_process);
 
 }

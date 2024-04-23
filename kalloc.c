@@ -72,7 +72,9 @@ kfree(char *v)
     panic("kfree");
 
   // Fill with junk to catch dangling refs.
+  // cprintf("kfree: %x\n", v);
   memset(v, 1, PGSIZE);
+  // cprintf("freed\n");
 
   if(kmem.use_lock)
     acquire(&kmem.lock);
@@ -124,9 +126,9 @@ char* kalloc(void) {
         release(&kmem.lock);
     
     // No free page available, attempt to swap out a page
-    cprintf("No free page available, attempting to swap out a page\n");
+    // cprintf("No free page available, attempting to swap out a page\n");
     char* victim_page = swap_out();
-    kfree(victim_page);
+    // kfree(victim_page);
     // cprintf("victim_page: %x\n", victim_page);
     return kalloc();
     if (victim_page != 0) {
