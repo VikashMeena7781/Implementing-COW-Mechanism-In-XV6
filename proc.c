@@ -143,6 +143,7 @@ userinit(void)
   p->tf->eflags = FL_IF;
   p->tf->esp = PGSIZE;
   p->tf->eip = 0;  // beginning of initcode.S
+  p->rss += PGSIZE;
 
   safestrcpy(p->name, "initcode", sizeof(p->name));
   p->cwd = namei("/");
@@ -207,6 +208,7 @@ fork(void)
   np->sz = curproc->sz;
   np->parent = curproc;
   *np->tf = *curproc->tf;
+  np->rss = curproc->rss;
 
   // Clear %eax so that fork returns 0 in the child.
   np->tf->eax = 0;
@@ -305,6 +307,7 @@ wait(void)
         p->killed = 0;
         p->pos = -1;
         p->state = UNUSED;
+        p->rss = 0;
         release(&ptable.lock);
         return pid;
       }

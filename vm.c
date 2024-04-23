@@ -44,10 +44,11 @@ int increment_rmap(pte_t * pte, uint procpos) {
       acquire(&rmap.lock);
 
       if (isBitSet(entry.procbitmap, procpos)) {
-
+        release(&rmap.lock);
         return getcount(entry.procbitmap);
       } else {
         setBit(&entry.procbitmap, procpos, 1);
+        release(&rmap.lock);
         return getcount(entry.procbitmap);
       }
 
@@ -601,8 +602,8 @@ copyuvm(pde_t *pgdir, uint sz, uint procpos)
   for(i = 0; i < sz; i += PGSIZE){
     if((pte = walkpgdir(pgdir, (void *) i, 0)) == 0)
       panic("copyuvm: pte should exist");
-    if(!(*pte & PTE_P))
-      panic("copyuvm: page not present");
+    // if(!(*pte & PTE_P))
+    //   panic("copyuvm: page not present");
 
     // pa = PTE_ADDR(*pte);
     // flags = PTE_FLAGS(*pte);
