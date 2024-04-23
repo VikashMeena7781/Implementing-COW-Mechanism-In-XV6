@@ -151,7 +151,7 @@ char* swap_out(){
 
 
 
-        update(victim_page, swap_slot);
+        // update(victim_page, swap_slot);
     
 
 
