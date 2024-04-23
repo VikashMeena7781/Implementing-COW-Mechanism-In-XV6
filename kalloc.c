@@ -69,7 +69,7 @@ kfree(char *v)
 {
   struct run *r;
 
-  // cprintf("kfree: %x\n", v);
+  cprintf("kfree: %x\n", v);
 
   if((uint)v % PGSIZE || v < end || V2P(v) >= PHYSTOP)
     panic("kfree");
@@ -77,7 +77,7 @@ kfree(char *v)
   // Fill with junk to catch dangling refs.
   // cprintf("kfree: %x\n", v);
   memset(v, 1, PGSIZE);
-  // cprintf("freed\n");
+  cprintf("freed\n");
 
   if(kmem.use_lock)
     acquire(&kmem.lock);

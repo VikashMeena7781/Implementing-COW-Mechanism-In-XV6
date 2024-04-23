@@ -144,7 +144,7 @@ char* swap_out(){
         uint victim_page_i = get_victim_page(victim_proc);
 
         pte_t *victim_page = walkpgdir(victim_proc->pgdir, (void*)victim_page_i, 0);
-        // // cprintf("Victim process pte: %p\n", *victim_page);
+        cprintf("Victim process pte out: %p\n", *victim_page);
         // // cprintf("Victim page found\n");
         char* page = (char*)P2V(PTE_ADDR(*victim_page));
 
@@ -174,17 +174,17 @@ char* swap_out(){
 
 
 void swap_in(){
-    // cprintf("swap in\n");
+    cprintf("swap in\n");
     struct proc *curproc = myproc();
     // CR2 holds the linear address that caused a page fault. 
     uint addr = rcr2();
     pde_t *pgdir = curproc->pgdir;
-    // cprintf("swap in addr: %p\n", addr);
-    // cprintf("swap in pid: %p\n", curproc->pid);
+    cprintf("swap in addr: %p\n", addr);
+    cprintf("swap in pid: %p\n", curproc->pid);
     pte_t *pte = walkpgdir(pgdir, (char*)addr, 0);
-    // cprintf("swapped pte: %p\n", *pte); 
+    cprintf("swapped pte: %p\n", *pte); 
     if (!pte || !(*pte & PTE_swapped)) {
-        // panic("swap_in: page not swapped out");
+        panic("swap_in: page not swapped out");
         // cprintf("pte: %p\n", *pte);
         // cprintf("no swap");
         return;
@@ -274,7 +274,7 @@ void update(uint idx, int swap_slot, pte_t *pte){
 void update_swap_in(int swap_slot, pde_t *pgdir, uint addr) {
     // // cprintf("update in swap in\n");
     struct swap_slot* slot = &swap_slots[swap_slot];
-    // // cprintf("slot: %d\n", swap_slot);
+    cprintf("slot: %d\n", swap_slot);
     if (slot->is_free == FREE) {
         panic("update_swap_in: slot is already free");
     }
@@ -313,12 +313,14 @@ void update_swap_in(int swap_slot, pde_t *pgdir, uint addr) {
         
         // not sure about this line ...
         proc_pte=walkpgdir(process->pgdir,(char*)addr, 0);
-        // cprintf("process pte in swap in: %p\n", *proc_pte);
-        // cprintf("process pid in swap in: %d\n", process->pid);
+        cprintf("process pte in swap in: %p\n", *proc_pte);
+        cprintf("process pid in swap in: %d\n", process->pid);
         if(proc_pte && (*proc_pte & PTE_swapped)){
-            *proc_pte=V2P(mem) | perms | PTE_P;
+            *proc_pte=V2P(mem) | perms | PTE_P| PTE_A;
             *proc_pte &= ~PTE_swapped;
+
             process->rss+=PGSIZE;
+            cprintf("process pte in swap in after update: %p\n", *proc_pte);
             lcr3(V2P(process->pgdir)); 
         }
     }
@@ -340,6 +342,6 @@ void update_swap_in(int swap_slot, pde_t *pgdir, uint addr) {
     // lcr3(V2P(myproc()->pgdir));  // Flush the TLB to ensure the changes take effect
 
     release(&rmap.lock);  // Release the lock
-    // // cprintf("update swap in done\n");
+    cprintf("update swap in done\n");
 
 }
