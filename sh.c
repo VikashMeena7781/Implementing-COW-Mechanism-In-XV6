@@ -161,16 +161,16 @@ main(void)
 
   // Read and run input commands.
   while(getcmd(buf, sizeof(buf)) >= 0){
-    printf(1, "hiiiiiiiiiiiiiiiiiii");
+    // printf(1, "hiiiiiiiiiiiiiiiiiii");
     if(buf[0] == 'c' && buf[1] == 'd' && buf[2] == ' '){
       // Chdir must be called by the parent, not the child.
       buf[strlen(buf)-1] = 0;  // chop \n
       if(chdir(buf+3) < 0)
-        printf(2, "cannot cd %s\n", buf+3);
+        // printf(2, "cannot cd %s\n", buf+3);
       continue;
     }
     if(fork1() == 0)
-     { printf(1, "filter: starting\n");
+     { 
       runcmd(parsecmd(buf));}
     wait();
   }
@@ -190,11 +190,11 @@ fork1(void)
   int pid;
 
   pid = fork();
-  printf(2, "pid:  %d\n", getpid());
-  printf(2, "pid:  %d\n", pid);
+  // printf(2, "pid:  %d\n", getpid());
+  // printf(2, "pid:  %d\n", pid);
 
   if(pid == -1){
-    printf(1,"Inside fork1\n");
+    // printf(1,"Inside fork1\n");
     panic("fork");
   }
   return pid;

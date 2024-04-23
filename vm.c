@@ -20,11 +20,11 @@ pde_t *kpgdir;  // for use in scheduler()
 RMap rmap; 
 
 void rmap_init(void) {
-  cprintf("rmap_init\n");
+  // cprintf("rmap_init\n");
   initlock(&rmap.lock, "rmap");
   for (int i = 0; i < MAX_RMAP_ENTRIES; i++) {
     char * name = "rmap_entry_" + i;
-    cprintf("name: %s\n", name);
+    // cprintf("name: %s\n", name);
     initlock(&rmap.entries[i].lock, name);
   }
   // acquire(&rmap.lock);
@@ -402,8 +402,7 @@ setupkvm(void)
   struct kmap *k;
 
   if((pgdir = (pde_t*)kalloc()) == 0)
-  {cprintf("lund mera\n");
-    return 0;}
+    return 0;
   memset(pgdir, 0, PGSIZE);
   if (P2V(PHYSTOP) > (void*)DEVSPACE)
     panic("PHYSTOP too high");
@@ -411,7 +410,6 @@ setupkvm(void)
     if(mappages(pgdir, k->virt, k->phys_end - k->phys_start,
                 (uint)k->phys_start, k->perm) < 0) {
       freevm(pgdir, NULL);
-      cprintf("lund tera");
       return 0;
     }
   return pgdir;
@@ -519,13 +517,13 @@ allocuvm( pte_t * pgdir, uint oldsz, uint newsz,struct proc *p)
   for(; a < newsz; a += PGSIZE){
     mem = kalloc();
     if(mem == 0){
-      cprintf("allocuvm out of memory\n");
+      // cprintf("allocuvm out of memory\n");
       deallocuvm(pgdir, newsz, oldsz,p );
       return 0;
     }
     memset(mem, 0, PGSIZE);
     if(mappages(pgdir, (char*)a, PGSIZE, V2P(mem), PTE_W|PTE_U) < 0){
-      cprintf("allocuvm out of memory (2)\n");
+      // cprintf("allocuvm out of memory (2)\n");
       deallocuvm(pgdir, newsz, oldsz, p);
       kfree(mem);
       return 0;
@@ -533,7 +531,7 @@ allocuvm( pte_t * pgdir, uint oldsz, uint newsz,struct proc *p)
     pte_t * pt = walkpgdir(pgdir, (char*)mem, 0);
     // Increment the reference count for the page
     if (increment_rmap(pt, p) == -1) {
-      cprintf("allocuvm: increment_rmap failed\n");
+      // cprintf("allocuvm: increment_rmap failed\n");
       deallocuvm(pgdir, newsz, oldsz, p);
       kfree(mem);
       panic("allocuvm: increment_rmap failed");
@@ -569,7 +567,7 @@ deallocuvm(pte_t * pgdir, uint oldsz, uint newsz,struct proc *p )
       // decrement the reference count for the page
       int ref_count = decrement_rmap(pte, p);
       if ( ref_count == -1) {
-        cprintf("deallocuvm: decrement_rmap failed\n");
+        // cprintf("deallocuvm: decrement_rmap failed\n");
         panic("deallocuvm: decrement_rmap failed");
         return 0;
       }
@@ -661,7 +659,7 @@ copyuvm(pde_t *pgdir, uint sz, struct proc *p)
   uint i ;
 
   if((d = setupkvm()) == 0){
-    cprintf("0 is returned\n");
+    // cprintf("0 is returned\n");
     return 0;
   }
   for(i = 0; i < sz; i += PGSIZE){
@@ -684,7 +682,7 @@ copyuvm(pde_t *pgdir, uint sz, struct proc *p)
     
     // increment rmap
     if (increment_rmap(pte, p) == -1) {
-      cprintf("copyuvm: increment_rmap failed\n");
+      // cprintf("copyuvm: increment_rmap failed\n");
       panic("copyuvm: increment_rmap failed");
       return 0;
     }
@@ -751,7 +749,7 @@ int copy_on_write(void) {
     struct proc *curproc = myproc();
     uint faulting_addr = rcr2();  // Read CR2 register to get the faulting virtual address
     pte_t *pte;
-    cprintf("copy on write used\n");
+    // cprintf("copy on write used\n");
 
     // Get the page table entry for the faulting address
     if ((pte = walkpgdir(curproc->pgdir, (void *)faulting_addr, 0)) == 0) {

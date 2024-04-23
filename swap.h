@@ -16,6 +16,10 @@ struct swap_slot {
   struct rmap_entry swap_rmap;
 };
 
+extern struct {
+  struct spinlock lock;
+  struct proc proc[NPROC];
+} ptable;
 
 extern struct swap_slot swap_slots[SWAPBLOCKS]; // NSLOTS is calculated based on NSWAPBLOCKS and the size of a swap slot
 // todo read and write functions

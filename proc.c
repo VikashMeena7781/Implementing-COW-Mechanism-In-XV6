@@ -191,7 +191,7 @@ fork(void)
   if((np = allocproc()) == 0){
     return -1;
   }
-  cprintf("Inside fork()\n");
+  // cprintf("Inside fork()\n");
   // Copy process state from proc.
   if((np->pgdir = copyuvm(curproc->pgdir, curproc->sz, np)) == 0){
     kfree(np->kstack);
@@ -199,7 +199,7 @@ fork(void)
     np->state = UNUSED;
     return -1;
   }
-  cprintf( "Copied pgdir successfully \n");
+  // cprintf( "Copied pgdir successfully \n");
   np->sz = curproc->sz;
   np->parent = curproc;
   *np->tf = *curproc->tf;
