@@ -9,10 +9,7 @@
 #include "vm.h"
 #include "swap.h"
 
-struct {
-  struct spinlock lock;
-  struct proc proc[NPROC];
-} ptable;
+PTable ptable;
 
 static struct proc *initproc;
 

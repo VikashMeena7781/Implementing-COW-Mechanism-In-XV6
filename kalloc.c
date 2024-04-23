@@ -9,6 +9,7 @@
 #include "mmu.h"
 #include "spinlock.h"
 #include "vm.h"
+#include "proc.h"
 #include "swap.h"
 
 void freerange(void *vstart, void *vend);
