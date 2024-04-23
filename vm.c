@@ -62,7 +62,7 @@ int increment_rmap(pte_t * pte, uint procpos) {
     int ans = -1;
 
     int free_index = -1;  // Store index of the first free slot
-    int found = 0;
+    // int found = 0;
     for (int i = 0; i < MAX_RMAP_ENTRIES; i++) {
         if (rmap.entries[i].pa == pa && getcount(rmap.entries[i].procbitmap) > 0) {
             if (isBitSet(rmap.entries[i].procbitmap, procpos)) {
@@ -75,7 +75,7 @@ int increment_rmap(pte_t * pte, uint procpos) {
               release(&rmap.lock);
               return ans;
             }
-            found = 1;
+            // found = 1;
             break;  
         }
 
@@ -800,3 +800,35 @@ copyout(pde_t *pgdir, uint va, void *p, uint len)
 //PAGEBREAK!
 // Blank page.
 
+
+unsigned int getcount(unsigned long long n) {
+    unsigned int count = 0;
+    while (n) {
+        n &= (n - 1);  // clear the least significant bit set
+        count++;
+    }
+    return count;
+}
+
+int getSetBitIndices(bitmap n, int indices[64]) {
+    int count = 0;
+    for (int i = 0; i < 64; i++) {
+        if (n & (1ULL << i)) {  // Check if the i-th bit is set
+            indices[count++] = i;  // Store the index and increment count
+        }
+    }
+    return count;  // Return the number of set bits
+}
+
+void setBit(unsigned long long *n, int index, int value) {
+    if (value == 1) {
+        *n |= (1ULL << index);  // Set bit at position 'index' to 1
+    } else {
+        *n &= ~(1ULL << index); // Set bit at position 'index' to 0
+    }
+}
+
+
+int isBitSet(unsigned long long n, int index) {
+    return (n & (1ULL << index)) != 0;  // Check if the bit at 'index' is set
+}

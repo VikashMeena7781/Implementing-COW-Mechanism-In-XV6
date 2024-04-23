@@ -76,11 +76,14 @@ allocproc(void)
   char *sp;
 
   acquire(&ptable.lock);
+  uint pos = 0;  
 
-  for(p = ptable.proc; p < &ptable.proc[NPROC]; p++)
+  for(p = ptable.proc; p < &ptable.proc[NPROC]; p++){
     if(p->state == UNUSED)
       goto found;
 
+    pos++;
+}
   release(&ptable.lock);
   return 0;
 
@@ -101,6 +104,7 @@ found:
   sp -= sizeof *p->tf;
   p->tf = (struct trapframe*)sp;
   p->rss = PGSIZE;
+  p->pos = pos;
 
   // Set up new context to start executing at forkret,
   // which returns to trapret.
@@ -358,7 +362,7 @@ struct proc* get_victim_proc(void){
 }
 
 
-pte_t* get_victim_page(struct proc* victim_process) {
+uint get_victim_page(struct proc* victim_process) {
   pte_t *victim_page;
   // cprintf("hereeeeeee\n");
   // Find the victim page within the victim process
@@ -367,7 +371,7 @@ pte_t* get_victim_page(struct proc* victim_process) {
     victim_page = walkpgdir(victim_process->pgdir, (char*)i, 0);
     if (victim_page && (*victim_page & PTE_P) && !(*victim_page & PTE_A) && (*victim_page & PTE_U)) {
       // cprintf("accessed page %d\n",accessed_page);
-      return victim_page;
+      return i;
     }else if(victim_page && (*victim_page & PTE_P) && (*victim_page & PTE_A)  && (*victim_page & PTE_U)){
       accessed_page +=1;
     }
@@ -393,7 +397,7 @@ pte_t* get_victim_page(struct proc* victim_process) {
   for (uint i = 0; i < victim_process->sz; i += PGSIZE) {
     victim_page = walkpgdir(victim_process->pgdir, (char*)i, 0);
     if (victim_page && (*victim_page & PTE_P) && !(*victim_page & PTE_A) && (*victim_page & PTE_U)) {
-      return victim_page;
+      return i;
     }else if(victim_page && (*victim_page & PTE_P) && (*victim_page & PTE_A) && (*victim_page & PTE_U)){
       accessed_page +=1;
     }

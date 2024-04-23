@@ -62,40 +62,40 @@ void init_swap(void) {
         swap_slots[i].page_perm = 0; // Default permissions
     }
 }
-void update(pte_t *pte, int swap_slot);
+void update(uint idx, int swap_slot, pte_t *pte);
 void update_swap_in(int swap_slot, pde_t *pgdir, uint addr);
 
 int swapalloc(void) {
-    // cprintf("allocating free slot\n");
+    // // cprintf("allocating free slot\n");
     for (int i = 0; i < SWAPBLOCKS; i++) {
         if (swap_slots[i].is_free == FREE) {
             swap_slots[i].is_free = OCCUPIED; // Mark the slot as occupied
             return i; // Return the index of the allocated slot
         }
     }
-    // cprintf("%d\n",SWAPBLOCKS);
+    // // cprintf("%d\n",SWAPBLOCKS);
     return -1; // No free slot found
 }
 
 
 void write_swap_block(int block_addr, char *data) {
-    // cprintf("Swap block writing\n");
+    // // cprintf("Swap block writing\n");
     struct buf *b = bread(ROOTDEV, block_addr); // Load the block from disk into buffer cache
     // acquire(&rmap.lock); // Acquire the lock for the buffer block
-    // cprintf("Swap block read\n");
+    // // cprintf("Swap block read\n");
     if (holding(&rmap.lock) == 0) {
-        // cprintf("rmap lock is not held\n");
+        // // cprintf("rmap lock is not held\n");
     }
     else {
-        // cprintf("rmap lock is held\n");
+        // // cprintf("rmap lock is held\n");
     }
-    // // cprintf("data: %s\n", data);
+    // // // cprintf("data: %s\n", data);
     memmove(b->data, data,   BSIZE);   // Copy data to the buffer block
     // // cprintf("Data copied to buffer block\n");
     // release(&rmap.lock); // Release the lock for the buffer block
     bwrite(b);    // Write the buffer block back to disk
     brelse(b);    // Release the buffer block
-    // cprintf("Swap block released\n");
+    // // cprintf("Swap block released\n");
 }
 
 extern struct superblock sb;
@@ -104,7 +104,7 @@ void write_swap_slot(char *page, int slot_index) {
     if (slot_index < 0 || slot_index >= SWAPBLOCKS) {
         panic("Invalid swap slot index");
     }
-    // cprintf("sb start %d\n", sb.swapstart);
+    // // cprintf("sb start %d\n", sb.swapstart);
     int block_addr = sb.swapstart + slot_index * 8; // Calculate starting block for this slot
     for (int i = 0; i < 8; i++) {
         // cprintf("Writing block %d\n", block_addr + i);
@@ -118,7 +118,7 @@ void read_swap_slot(char *page, int slot_index) {
     }
     int block_addr = sb.swapstart + slot_index * 8; // Calculate starting block for this slot
     for (int i = 0; i < 8; i++) {
-        // cprintf("Reading swap slot block %d\n", block_addr + i);
+        // // cprintf("Reading swap slot block %d\n", block_addr + i);
         struct buf *b = bread(ROOTDEV, block_addr + i); // Read the block from disk into buffer cache
 
         memmove(page + (i * BSIZE), b->data, BSIZE); // Copy data from the buffer block to page
@@ -127,44 +127,47 @@ void read_swap_slot(char *page, int slot_index) {
 }
 
 char* swap_out(){
-    // cprintf("swap out\n");
+    // // cprintf("swap out\n");
     struct proc* current_proc = myproc();
     int swap_slot = swapalloc();
     if (swap_slot==-1){
         panic("No free swap slot found");
-        // cprintf("No free swap slot found\n");
+        // // cprintf("No free swap slot found\n");
         return 0;
     }else{
-        // cprintf("Free swap slot found\n");
+        // // cprintf("Free swap slot found\n");
         struct proc* victim_proc = get_victim_proc();
-        // cprintf("victim proc id: %d\n", victim_proc->pid);
-        // cprintf("Victim process found\n");
+        // // cprintf("victim proc id: %p\n", victim_proc->pid);
+        // // cprintf("Victim process found\n");
         // victim_proc->rss-=PGSIZE;
 
-        pte_t* victim_page = get_victim_page(victim_proc);
-        // cprintf("Victim page found\n");
+        uint victim_page_i = get_victim_page(victim_proc);
+
+        pte_t *victim_page = walkpgdir(victim_proc->pgdir, (void*)victim_page_i, 0);
+        // // cprintf("Victim process pte: %p\n", *victim_page);
+        // // cprintf("Victim page found\n");
         char* page = (char*)P2V(PTE_ADDR(*victim_page));
 
         swap_slots[swap_slot].page_perm = PTE_FLAGS(*victim_page);
 
         write_swap_slot(page,swap_slot);
 
-        update(victim_page, swap_slot);
+        update(victim_page_i, swap_slot, victim_page);
     
         // swap_slots[swap_slot].is_free = OCCUPIED;
-        // cprintf("Page updated\n");
+        // // cprintf("Page updated\n");
         // acquire(&rmap.lock);
         // release(&rmap.lock);
-        // cprintf("Swap slot written\n");
+        // // cprintf("Swap slot written\n");
         // page table entry  of victim process's page..
-        // cprintf("pa of victim: %d\n", PTE_ADDR(*victim_page));
-        // cprintf("victim page: %d\n", *victim_page);
+        // // cprintf("pa of victim: %d\n", PTE_ADDR(*victim_page));
+        // // cprintf("victim page: %d\n", *victim_page);
         // *victim_page = (swap_slot << 12) | PTE_swapped ;
         // *victim_page &= ~PTE_P;
-        // cprintf("victim page after update: %d\n", *victim_page);
+        // // cprintf("victim page after update: %d\n", *victim_page);
         kfree(page);
         lcr3(V2P(current_proc->pgdir));
-        // cprintf("Page table entry updated\n");
+        // // cprintf("Page table entry updated\n");
         return page;
     }
 }
@@ -176,14 +179,15 @@ void swap_in(){
     // CR2 holds the linear address that caused a page fault. 
     uint addr = rcr2();
     pde_t *pgdir = curproc->pgdir;
-    // cprintf("swap in addr: %d\n", addr);
-    // cprintf("swap in pid: %d\n", curproc->pid);
-    pte_t *pte = walkpgdir(pgdir, (char*)addr, 0); 
+    // cprintf("swap in addr: %p\n", addr);
+    // cprintf("swap in pid: %p\n", curproc->pid);
+    pte_t *pte = walkpgdir(pgdir, (char*)addr, 0);
+    // cprintf("swapped pte: %p\n", *pte); 
     if (!pte || !(*pte & PTE_swapped)) {
-        panic("swap_in: page not swapped out");
-        // // cprintf("pte: %p\n", *pte);
-        // // cprintf("no swap");
-        // return;
+        // panic("swap_in: page not swapped out");
+        // cprintf("pte: %p\n", *pte);
+        // cprintf("no swap");
+        return;
     }
     int swap_slot_no = *pte >> 12;
     update_swap_in(swap_slot_no, pgdir, addr);
@@ -216,67 +220,7 @@ void clear_swap_slot(void){
 }
 
 
-// void update(pte_t *pte, int swap_slot) {
-//     if (*pte & PTE_swapped) {
-//         panic("update: page is swapped out");
-//     }
-//     uint pa = PTE_ADDR(*pte); // Extract the physical address from the page table entry
-//     struct rmap_entry* entry;
-//     // cprintf("pa: %d\n", pa);
-//     // cprintf("pte: %d\n", *pte);
-//     // cprintf("update tried");
-//     // acquire(&rmap.lock); 
-//     for (int i = 0; i < MAX_RMAP_ENTRIES; i++) {
-//         entry = &rmap.entries[i];
-//         if (entry->pa == pa) { 
-//             // cprintf("update in if\n");
-//             // swap_slots[swap_slot].swap_rmap = *entry; // Deep copy the rmap entry
-//             swap_slots[swap_slot].is_free=OCCUPIED;
-//             // swap_slots[swap_slot].swap_rmap.pa = entry.pa; 
-//             // swap_slots[swap_slot].swap_rmap.ref_count=entry.ref_count;
-
-//             // swap_slots[swap_slot].swap_rmap.lock=entry.lock;
-
-//             deep_copy_rmap_entry(&swap_slots[swap_slot].swap_rmap, entry);
-
-//             // for(int k=0;k<NPROC;k++){
-//             //     swap_slots[swap_slot].swap_rmap.procs[k]=entry.procs[k];
-//             // }
-//             for (int j = 0; j < NPROC; j++) {
-//                 if (entry->procs[j] != NULL) {
-//                     // cprintf("update in loop\n");
-//                     pte_t *proc_pte;
-//                     // Not sure about this line 
-//                     proc_pte = walkpgdir(entry->procs[j]->pgdir, (void*)P2V(pa), 0);
-//                     if ((proc_pte != 0) && (*proc_pte & PTE_P)) {
-//                         // cprintf("update in andar\n");
-//                         // Set the PTE to indicate that the page is now swapped out
-//                         *proc_pte = (*proc_pte & 0xfff) | (swap_slot << 12) | PTE_swapped;
-
-//                         entry->procs[j]->rss-=PGSIZE;
-//                         *proc_pte &= ~PTE_P;
-//                         // cprintf("proc pte: %d\n", *proc_pte);
-//                         // panic("update: page is swapped out");
-//                     }
-//                         lcr3(V2P(entry->procs[j]->pgdir));
-//                 }
-//             }
-//             // Clear the original rmap entry manually using a loop
-//             entry->pa = 0;
-//             entry->ref_count = 0;
-//             for (int j = 0; j < NPROC; j++) {
-//                 entry->procs[j] = NULL;
-//             }
-
-//             // break; // Exit the loop once the entry is processed
-//         }
-//     }
-//     // release(&rmap.lock); // Release the lock
-//     // cprintf("update done");
-//     lcr3(V2P(myproc()->pgdir));  // Flush the TLB to ensure the changes take effect
-// }
-
-void update(pte_t *pte, int swap_slot){
+void update(uint idx, int swap_slot, pte_t *pte){
     if (*pte & PTE_swapped) {
         panic("update: page is swapped out");
     }
@@ -287,20 +231,23 @@ void update(pte_t *pte, int swap_slot){
         if(rmap.entries[i].pa==pa){
             int indices[64];  // Array to hold the indices of set bits
             int ans = getSetBitIndices(rmap.entries[i].procbitmap, indices);  
+            // // cprintf("ans: %d\n", ans);
             for(int j=0;j<ans;j++){
                 pte_t *proc_pte;
 
                 struct proc* process = &ptable.proc[indices[j]];
+                // // cprintf("process pid: %d\n", process->pid);
 
-                proc_pte = walkpgdir(process->pgdir,(void*)P2V(pa), 0);
+                proc_pte = walkpgdir(process->pgdir,(void*)idx, 0);
                 if ((proc_pte != 0) && (*proc_pte & PTE_P)) {
-                        // cprintf("update in andar\n");
+                        // // cprintf("update in andar\n");
                         // Set the PTE to indicate that the page is now swapped out
-                        *proc_pte = (*proc_pte & 0xfff) | (swap_slot << 12) | PTE_swapped;
+                        // // cprintf("proc pte: %p\n", *proc_pte);
+                        *proc_pte = PTE_FLAGS(proc_pte) | (swap_slot << 12) | PTE_swapped;
                         process->rss-=PGSIZE;
                         *proc_pte &= ~PTE_P;
                         lcr3(V2P(process->pgdir));
-                        // cprintf("proc pte: %d\n", *proc_pte);
+                        // // cprintf("proc pte: %d\n", *proc_pte);
                         // panic("update: page is swapped out");
                 }
 
@@ -325,15 +272,15 @@ void update(pte_t *pte, int swap_slot){
 // TO DO: change increment, decrement for swapped entries, swap in tell all processes 
 
 void update_swap_in(int swap_slot, pde_t *pgdir, uint addr) {
-    // cprintf("update in swap in\n");
+    // // cprintf("update in swap in\n");
     struct swap_slot* slot = &swap_slots[swap_slot];
-    // cprintf("slot: %d\n", swap_slot);
+    // // cprintf("slot: %d\n", swap_slot);
     if (slot->is_free == FREE) {
         panic("update_swap_in: slot is already free");
     }
 
     char *mem = kalloc(); 
-    // cprintf("memory allocated after kalloc\n"); 
+    // // cprintf("memory allocated after kalloc\n"); 
     if (!mem) {
         panic("update_swap_in: unable to allocate memory");
     }
@@ -342,11 +289,21 @@ void update_swap_in(int swap_slot, pde_t *pgdir, uint addr) {
     read_swap_slot(mem, swap_slot); 
 
     acquire(&rmap.lock);  
-    // cprintf("swap in slot read\n");
+    // // cprintf("swap in slot read\n");
 
     int proc_bitmap = slot->swap_rmap.procbitmap;
     int indices[64];
     int ans = getSetBitIndices(proc_bitmap, indices);
+
+
+    for(int i=0;i<MAX_RMAP_ENTRIES;i++){
+        if(rmap.entries[i].pa==0 && getcount(rmap.entries[i].procbitmap)==0) {
+            rmap.entries[i].pa=V2P(mem);
+            rmap.entries[i].procbitmap=proc_bitmap;
+            break;
+        }
+    }
+
     for(int i=0;i<ans;i++){
         pte_t *proc_pte;
 
@@ -355,7 +312,9 @@ void update_swap_in(int swap_slot, pde_t *pgdir, uint addr) {
         
         
         // not sure about this line ...
-        proc_pte=walkpgdir(process->pgdir,(void*)P2V(slot->swap_rmap.pa), 0);
+        proc_pte=walkpgdir(process->pgdir,(char*)addr, 0);
+        // cprintf("process pte in swap in: %p\n", *proc_pte);
+        // cprintf("process pid in swap in: %d\n", process->pid);
         if(proc_pte && (*proc_pte & PTE_swapped)){
             *proc_pte=V2P(mem) | perms | PTE_P;
             *proc_pte &= ~PTE_swapped;
@@ -374,13 +333,13 @@ void update_swap_in(int swap_slot, pde_t *pgdir, uint addr) {
     // pte_t *pte = walkpgdir(pgdir, (char*)addr, 0); 
     // *pte=V2P(mem) | perms | PTE_P ; 
 
-    // cprintf("pte: %p\n", *pte);
+    // // cprintf("pte: %p\n", *pte);
     // just to ensure that updates reflects
     // pte = walkpgdir(pgdir, (char*)addr, 0);
 
     // lcr3(V2P(myproc()->pgdir));  // Flush the TLB to ensure the changes take effect
 
     release(&rmap.lock);  // Release the lock
-    // cprintf("update swap in done\n");
+    // // cprintf("update swap in done\n");
 
 }
