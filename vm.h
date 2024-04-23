@@ -29,3 +29,15 @@ unsigned int getcount(unsigned long long n) {
     return count;
 }
 
+void setBit(unsigned long long *n, int index, int value) {
+    if (value == 1) {
+        *n |= (1ULL << index);  // Set bit at position 'index' to 1
+    } else {
+        *n &= ~(1ULL << index); // Set bit at position 'index' to 0
+    }
+}
+
+
+int isBitSet(unsigned long long n, int index) {
+    return (n & (1ULL << index)) != 0;  // Check if the bit at 'index' is set
+}

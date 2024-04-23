@@ -25,14 +25,12 @@ void rmap_init(void) {
   // acquire(&rmap.lock);
   for (int i = 0; i < MAX_RMAP_ENTRIES; i++) {
     rmap.entries[i].pa = 0;
-    for (int j = 0; j < NPROC; j++) {
-      rmap.entries[i].procs[j] = NULL;
-    }
+    rmap.entries[i].procbitmap = 0;
   }
   // release(&rmap.lock);
 }
 
-int increment_rmap(pte_t * pte, struct proc *p) {
+int increment_rmap(pte_t * pte, uint procpos) {
 
     // check if pte is swapped
     if (*pte & PTE_swapped) {
@@ -42,34 +40,19 @@ int increment_rmap(pte_t * pte, struct proc *p) {
       struct swap_slot swap_slot = swap_slots[swap_slot_no];
 
       struct rmap_entry entry = swap_slot.swap_rmap;
-      int ans = -1;
-  // Store index of the first free slot
-          int found = 0;
 
-      // acquire lock
-      acquire(&entry.lock);
-      for (int j = 0; j < NPROC; j++) {
-                if (entry.procs[j] == p) {
-                    entry.ref_count++;  // Increment ref count if pa found
-                    ans = entry.ref_count;
-                    panic("Process already exists and page swapped\n");
-                    found = 1;
-                   break;
-                }
-            }
+      acquire(&rmap.lock);
 
-            if (!found) {
-                for (int j = 0; j < NPROC; j++) {
-                    if (entry.procs[j] == NULL) {
-                        entry.procs[j] = p;
-                        entry.ref_count++;  // Increment the ref count only if adding a new process
-                        ans = entry.ref_count;
-                        break;
-                    }
-                }
-            }
-            release(&entry.lock);
-            return ans;
+      if (isBitSet(entry.procbitmap, procpos)) {
+
+        return getcount(entry.procbitmap);
+      } else {
+        setBit(&entry.procbitmap, procpos, 1);
+        return getcount(entry.procbitmap);
+      }
+
+      release(&rmap.lock);
+
     }
 
     uint pa = PTE_ADDR(*pte);
@@ -81,42 +64,32 @@ int increment_rmap(pte_t * pte, struct proc *p) {
     int free_index = -1;  // Store index of the first free slot
     int found = 0;
     for (int i = 0; i < MAX_RMAP_ENTRIES; i++) {
-        if (rmap.entries[i].pa == pa && rmap.entries[i].ref_count > 0) {
-            for (int j = 0; j < NPROC; j++) {
-                if (rmap.entries[i].procs[j] == p) {
-                    // rmap.entries[i].ref_count++;  // Increment ref count if pa found
-                    ans = rmap.entries[i].ref_count;
-                    // panic("Process already exists\n");
-                    found = 1;
-                   break;
-                }
+        if (rmap.entries[i].pa == pa && getcount(rmap.entries[i].procbitmap) > 0) {
+            if (isBitSet(rmap.entries[i].procbitmap, procpos)) {
+              ans = getcount(rmap.entries[i].procbitmap);
+              release(&rmap.lock);
+              return ans;
+            } else {
+              setBit(&rmap.entries[i].procbitmap, procpos, 1);
+              ans = getcount(rmap.entries[i].procbitmap);
+              release(&rmap.lock);
+              return ans;
             }
-
-            if (!found) {
-                for (int j = 0; j < NPROC; j++) {
-                    if (rmap.entries[i].procs[j] == NULL) {
-                        rmap.entries[i].procs[j] = p;
-                        rmap.entries[i].ref_count++;  // Increment the ref count only if adding a new process
-                        ans = rmap.entries[i].ref_count;
-                        break;
-                    }
-                }
-            }
-            release(&rmap.lock);
-            return ans;
+            found = 1;
+            break;  
         }
-        if (rmap.entries[i].ref_count == 0 && free_index == -1) {
+
+        if (getcount(rmap.entries[i].procbitmap) == 0 && free_index == -1) {
             free_index = i;  // Remember first free slot
         }
     }
     
     if (free_index != -1) {
-      rmap.entries[free_index].pa = pa;
-      rmap.entries[free_index].ref_count = 1;
-      rmap.entries[free_index].procs[0] = p;
-      ans = rmap.entries[free_index].ref_count;
-      release(&rmap.lock);
-      return ans;
+        rmap.entries[free_index].pa = pa;
+        setBit(&rmap.entries[free_index].procbitmap, procpos, 1);
+        ans = getcount(rmap.entries[free_index].procbitmap);
+        release(&rmap.lock);
+        return ans;
     }
 
     // Check if the process is already associated with this page
@@ -147,7 +120,7 @@ int increment_rmap(pte_t * pte, struct proc *p) {
 }
 
 
-int decrement_rmap(pte_t * pte, struct proc *p) {
+int decrement_rmap(pte_t * pte, uint procpos) {
   if (*pte & PTE_swapped) {
     // Handle swap case
       cprintf("decrement of swapped page: PTE_swapped\n");
@@ -155,26 +128,21 @@ int decrement_rmap(pte_t * pte, struct proc *p) {
     int swap_slot_no = *pte >> 12;
     struct swap_slot swap_slot = swap_slots[swap_slot_no];
     struct rmap_entry entry = swap_slot.swap_rmap;
-    int ans = -1;
-    acquire(&entry.lock);
-    for (int i = 0; i < NPROC; i++) {
-      if (entry.procs[i] == p) {
-        entry.procs[i] = NULL;
-        entry.ref_count--;
-        ans = entry.ref_count;
-        if (entry.ref_count == 0) {
-          entry.pa = 0;  // Mark the entry as unused
-          entry.ref_count = 0;
-          for (int j = 0; j < NPROC; j++) {
-            entry.procs[j] = NULL;
-          }
-          swap_slot.is_free = FREE;
-        }
-        
+    acquire(&rmap.lock);
+
+    if (isBitSet(entry.procbitmap, procpos)) {
+      setBit(&entry.procbitmap, procpos, 0);
+      if (getcount(entry.procbitmap) == 0) {
+        swap_slot.swap_rmap.procbitmap = 0;
+        swap_slot.swap_rmap.pa = 0;
+        swap_slot.is_free = 1;
       }
+      release(&rmap.lock);
+      return getcount(entry.procbitmap);
+    } else {
+      panic("decrement_rmap: process not found in rmap entry");
     }
-      release(&entry.lock);
-      return ans;
+
 
   }
 
@@ -182,56 +150,27 @@ int decrement_rmap(pte_t * pte, struct proc *p) {
   // int idx = PA2IDX(pa);
   // struct rmap_entry *entry = &rmap.entries[idx];
   int ans = -1;
-  if (p == NULL) {
+  if (procpos == -1) {
     return 0;
   }
   acquire(&rmap.lock);
 
   for (int i = 0; i < MAX_RMAP_ENTRIES; i++) {
     if (rmap.entries[i].pa == pa) {
-      if (rmap.entries[i].ref_count > 0) {
-        rmap.entries[i].ref_count--;  // Decrement ref count if pa found
-        ans = rmap.entries[i].ref_count;
-
-        // Remove process from the list
-        int done = 0;
-        for (int j = 0; j < NPROC; j++) {
-          if (rmap.entries[i].procs[j] == p) {
-            rmap.entries[i].procs[j] = NULL;
-            done = 1;
-            break;
-          }
+      if (isBitSet(rmap.entries[i].procbitmap, procpos)) {
+        setBit(&rmap.entries[i].procbitmap, procpos, 0);
+        if (getcount(rmap.entries[i].procbitmap) == 0) {
+          rmap.entries[i].procbitmap = 0;
+          rmap.entries[i].pa = 0;
         }
-        if (!done) {
-          panic("decrement_rmap: process not found in rmap entry");
-        }
-        if (rmap.entries[i].ref_count == 0) {
-          rmap.entries[i].pa = 0;  // Mark the entry as unused
-          rmap.entries[i].ref_count = 0;
-          for (int j = 0; j < NPROC; j++) {
-            rmap.entries[i].procs[j] = NULL;
-          }
-        }
+        ans = getcount(rmap.entries[i].procbitmap);
         release(&rmap.lock);
         return ans;
       } else {
-        // Error: trying to decrement a non-referenced page
-        panic("decrement_rmap: ref count is already 0");
+        panic("decrement_rmap: process not found in rmap entry");
       }
     }
   }
-  // Remove process from the list
-  // for (int i = 0; i < NPROC; i++) {
-    // if (entry->procs[i] == p) {
-      // entry->procs[i] = NULL;
-      // break;
-    // }
-  // }
-  // if (--entry->ref_count < 0) {
-    // Optionally clear process references or handle zero reference cleanup
-    // entry->ref_count = 0;
-  // }
-  // ans = entry->ref_count;
   release(&rmap.lock);
   return ans;
 }
@@ -406,7 +345,7 @@ setupkvm(void)
   for(k = kmap; k < &kmap[NELEM(kmap)]; k++)
     if(mappages(pgdir, k->virt, k->phys_end - k->phys_start,
                 (uint)k->phys_start, k->perm) < 0) {
-      freevm(pgdir, NULL);
+      freevm(pgdir, -1);
       return 0;
     }
   return pgdir;
@@ -457,7 +396,7 @@ switchuvm(struct proc *p)
 // Load the initcode into address 0 of pgdir.
 // sz must be less than a page.
 void
-inituvm(pde_t *pgdir, char *init, uint sz, struct proc *p)
+inituvm(pde_t *pgdir, char *init, uint sz, uint procpos)
 {
   char *mem;
 
@@ -469,7 +408,7 @@ inituvm(pde_t *pgdir, char *init, uint sz, struct proc *p)
   memmove(mem, init, sz);
   // pte from mem
   pte_t * pt = walkpgdir(pgdir, mem, 0);
-  increment_rmap(pt, p);
+  increment_rmap(pt, procpos);
 
 }
 
@@ -500,7 +439,7 @@ loaduvm(pde_t *pgdir, char *addr, struct inode *ip, uint offset, uint sz)
 // Allocate page tables and physical memory to grow process from oldsz to
 // newsz, which need not be page aligned.  Returns new size or 0 on error.
 int
-allocuvm( pte_t * pgdir, uint oldsz, uint newsz,struct proc *p)
+allocuvm( pte_t * pgdir, uint oldsz, uint newsz, uint procpos)
 {
   char *mem;
   uint a;
@@ -515,21 +454,21 @@ allocuvm( pte_t * pgdir, uint oldsz, uint newsz,struct proc *p)
     mem = kalloc();
     if(mem == 0){
       // cprintf("allocuvm out of memory\n");
-      deallocuvm(pgdir, newsz, oldsz,p );
+      deallocuvm(pgdir, newsz, oldsz,procpos );
       return 0;
     }
     memset(mem, 0, PGSIZE);
     if(mappages(pgdir, (char*)a, PGSIZE, V2P(mem), PTE_W|PTE_U) < 0){
       // cprintf("allocuvm out of memory (2)\n");
-      deallocuvm(pgdir, newsz, oldsz, p);
+      deallocuvm(pgdir, newsz, oldsz, procpos);
       kfree(mem);
       return 0;
     }
     pte_t * pt = walkpgdir(pgdir, (char*)mem, 0);
     // Increment the reference count for the page
-    if (increment_rmap(pt, p) == -1) {
+    if (increment_rmap(pt, procpos) == -1) {
       // cprintf("allocuvm: increment_rmap failed\n");
-      deallocuvm(pgdir, newsz, oldsz, p);
+      deallocuvm(pgdir, newsz, oldsz, procpos);
       kfree(mem);
       panic("allocuvm: increment_rmap failed");
       return 0;
@@ -543,7 +482,7 @@ allocuvm( pte_t * pgdir, uint oldsz, uint newsz,struct proc *p)
 // need to be less than oldsz.  oldsz can be larger than the actual
 // process size.  Returns the new process size.
 int
-deallocuvm(pte_t * pgdir, uint oldsz, uint newsz,struct proc *p )
+deallocuvm(pte_t * pgdir, uint oldsz, uint newsz,uint procpos )
 {
   pte_t *pte;
   uint a, pa;
@@ -562,7 +501,7 @@ deallocuvm(pte_t * pgdir, uint oldsz, uint newsz,struct proc *p )
         panic("kfree");
       char *v = P2V(pa);
       // decrement the reference count for the page
-      int ref_count = decrement_rmap(pte, p);
+      int ref_count = decrement_rmap(pte, procpos);
       if ( ref_count == -1) {
         // cprintf("deallocuvm: decrement_rmap failed\n");
         panic("deallocuvm: decrement_rmap failed");
@@ -580,13 +519,13 @@ deallocuvm(pte_t * pgdir, uint oldsz, uint newsz,struct proc *p )
 // Free a page table and all the physical memory pages
 // in the user part.
 void
-freevm(pde_t *pgdir, struct proc *p)
+freevm(pde_t *pgdir, uint procpos)
 {
   uint i;
 
   if(pgdir == 0)
     panic("freevm: no pgdir");
-  deallocuvm(pgdir, KERNBASE, 0, p);
+  deallocuvm(pgdir, KERNBASE, 0, procpos);
   for(i = 0; i < NPDENTRIES; i++){
     if(pgdir[i] & PTE_P){
       char * v = P2V(PTE_ADDR(pgdir[i]));
@@ -648,7 +587,7 @@ clearpteu(pde_t *pgdir, char *uva)
 // Given a parent process's page table, create a copy
 // of it for a child using the Copy-On-Write (COW) approach.
 pde_t*
-copyuvm(pde_t *pgdir, uint sz, struct proc *p)
+copyuvm(pde_t *pgdir, uint sz, uint procpos)
 {
   pde_t *d;
   pte_t *pte , *new_pte;
@@ -678,7 +617,7 @@ copyuvm(pde_t *pgdir, uint sz, struct proc *p)
 
     
     // increment rmap
-    if (increment_rmap(pte, p) == -1) {
+    if (increment_rmap(pte, procpos) == -1) {
       // cprintf("copyuvm: increment_rmap failed\n");
       panic("copyuvm: increment_rmap failed");
       return 0;
@@ -781,14 +720,14 @@ int copy_on_write(void) {
         //     kfree(mem);
         //     panic("copy_on_write: mappages failed");
         // }
-        int ref_count = decrement_rmap(pte, curproc);
+        int ref_count = decrement_rmap(pte, curproc->pos);
 
         *pte = V2P(mem) | PTE_FLAGS(*pte) | PTE_W | PTE_P;  
 
         // Update the rmap if using a reference count system
         // 
         // Increment the reference count for the page
-        if (increment_rmap(pte, curproc) == -1) {
+        if (increment_rmap(pte, curproc->pos) == -1) {
             panic("copy_on_write: increment_rmap failed");
         }
 
