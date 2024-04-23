@@ -9,10 +9,8 @@
 #define NPTENTRIES_R 1024
 
 struct rmap_entry {
-  struct spinlock lock;
-  int ref_count;  // Count of processes referencing this page
   uint pa;        // Physical address
-  struct proc * procs[NPROC_R];  // Array of pointers to processes
+  bitmap procbitmap [NPROC_R];  // Array of pointers to processes
 };
 
 typedef struct {

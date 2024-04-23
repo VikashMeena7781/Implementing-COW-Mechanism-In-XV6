@@ -22,14 +22,8 @@ RMap rmap;
 void rmap_init(void) {
   // cprintf("rmap_init\n");
   initlock(&rmap.lock, "rmap");
-  for (int i = 0; i < MAX_RMAP_ENTRIES; i++) {
-    char * name = "rmap_entry_" + i;
-    // cprintf("name: %s\n", name);
-    initlock(&rmap.entries[i].lock, name);
-  }
   // acquire(&rmap.lock);
   for (int i = 0; i < MAX_RMAP_ENTRIES; i++) {
-    rmap.entries[i].ref_count = 0;
     rmap.entries[i].pa = 0;
     for (int j = 0; j < NPROC; j++) {
       rmap.entries[i].procs[j] = NULL;
